@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trading Chart</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- Barra superior (toolbar) -->
+    <div id="toolbar">
+      <div class="tf-group">
+        <button class="tf-btn active" data-tf="1m">1m</button>
+        <button class="tf-btn" data-tf="5m">5m</button>
+        <button class="tf-btn" data-tf="15m">15m</button>
+      </div>
+      <span class="spacer"></span>
+      <button id="btn-reset">Reset</button>
+      <button id="btn-help">?</button>
+    </div>
+
+    <!-- Panel de precios (velas) -->
+    <div class="panel" id="price-panel">
+      <canvas id="price-canvas"></canvas>
+    </div>
+
+    <!-- Panel del indicador ATR -->
+    <div class="panel" id="atr-panel">
+      <canvas id="atr-canvas"></canvas>
+    </div>
+
+    <!-- Barra de estado inferior -->
+    <div id="statusbar">
+      <span id="status-hover">Mueve el cursor sobre el grafico...</span>
+      <span class="spacer"></span>
+      <span id="status-window"></span>
+    </div>
+
+  </div>
+
+  <!-- Modulos del frontend (se completan en los siguientes pasos) -->
+  <script src="scales.js"></script>
+  <script src="price_panel.js"></script>
+  <script src="atr_panel.js"></script>
+  <script src="chart_engine.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
