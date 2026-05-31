@@ -436,7 +436,7 @@ Para la **Parte 2**, el enunciado especifica **modelos predictivos recurrentes**
 
 ---
 
-## 11. Resumen de estado
+## 10. Resumen de estado
 
 **`[IMPLEMENTADO]` en la Parte 1**
 
@@ -448,9 +448,3 @@ Para la **Parte 2**, el enunciado especifica **modelos predictivos recurrentes**
 - Interacción: scroll, zoom horizontal/vertical, *crosshair* sincronizado, botones de timeframe, `Reset`, atajos `R`/`Q`.
 - Escalado lineal datos↔píxeles (transformaciones afines).
 - Manejo de huecos de mercado por índice (colapso de sesiones).
-
-**`[PARTE 2 · PROPUESTO]`**
-
-- Filtrado matemático de ruido/*fakeouts* (umbral `k·ATR`, mecha/cuerpo).
-- Máquina de estados / HMM de volatilidad.
-- Tensores, modelo recurrente (RNN/LSTM), entrenamiento y predicción.
