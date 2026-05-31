@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
 # ============================================================
 #  start.sh -- Lanzador del Trading Chart.
-#  Arranca el servidor Mojolicious y abre el navegador por
-#  defecto del sistema. Detener: Ctrl+C en esta ventana.
+#  Arranca el servidor y abre el navegador por defecto, incluso
+#  si el navegador estaba cerrado. Detener: Ctrl+C.
 # ============================================================
 
 URL="http://localhost:3000"
 
 cd "$(dirname "$0")/backend" || { echo "No encuentro la carpeta backend"; exit 1; }
+
+# Lanza un comando TOTALMENTE desacoplado del terminal/script, para que
+# el navegador arranque y siga vivo aunque no estuviera abierto antes.
+lanzar_desacoplado() {
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" >/dev/null 2>&1 &
+  else
+    nohup "$@" >/dev/null 2>&1 &
+  fi
+}
 
 abrir_navegador() {
   local url="$1"
@@ -18,22 +28,20 @@ abrir_navegador() {
     sleep 0.5
   done
 
-  # 2) Probar abridores en orden; usar el primero que exista Y funcione.
-  #    gio/xdg-open respetan el navegador POR DEFECTO del sistema;
-  #    el resto son respaldos por si la integracion de escritorio falla.
+  # 2) Primer abridor disponible (gio/xdg respetan el navegador por defecto),
+  #    lanzado desacoplado para que funcione el arranque en frio.
   for opener in "gio open" xdg-open gnome-open "$BROWSER" \
                 google-chrome google-chrome-stable chromium chromium-browser \
                 firefox microsoft-edge brave-browser; do
     [ -z "$opener" ] && continue
     local bin="${opener%% *}"
     command -v "$bin" >/dev/null 2>&1 || continue
-    if $opener "$url" >/dev/null 2>&1; then
-      echo ">> Navegador abierto con: $opener"
-      return 0
-    fi
+    echo ">> Abriendo navegador con: $opener"
+    lanzar_desacoplado $opener "$url"
+    return 0
   done
 
-  echo ">> No pude abrir el navegador automaticamente. Abre manualmente: $url"
+  echo ">> No pude abrir el navegador. Abre manualmente: $url"
   return 1
 }
 

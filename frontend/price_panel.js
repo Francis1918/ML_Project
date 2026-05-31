@@ -1,8 +1,13 @@
-// ============================================================
-//  price_panel.js -- Dibuja velas OHLC, eje de precios y eje de tiempo.
-// ============================================================
-
 "use strict";
+
+// Devuelve el dia de la semana (lun..dom) de una fecha ISO, sin que la
+// zona horaria del navegador afecte el resultado.
+function diaSemana(iso) {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return "";
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay();
+  return ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"][d];
+}
 
 class PricePanel {
   constructor(canvas, scale) {
@@ -61,15 +66,13 @@ class PricePanel {
     }
   }
 
-  // Dibuja etiquetas de tiempo SIN encimarlas: solo pinta una etiqueta
-  // si esta a una distancia minima (minGap px) de la ultima pintada.
   draw_time_axis(ctx, anchors, firstIndex, lastIndex, y) {
     const s = this.scale;
     ctx.font = "11px -apple-system, Arial, sans-serif";
     ctx.textBaseline = "top";
     ctx.textAlign = "center";
 
-    const minGap = 55;        // separacion minima entre etiquetas (px)
+    const minGap = 60;
     let lastLabelX = -Infinity;
 
     for (const a of anchors) {
@@ -77,19 +80,18 @@ class PricePanel {
       const x = s.index_to_center_x(a.index);
       if (x < 0 || x > s.plot_width) continue;
 
-      // Cuadricula vertical: la dibujamos siempre (es tenue, no estorba)
       ctx.strokeStyle = "#1c212e";
       ctx.beginPath();
       ctx.moveTo(Math.round(x) + 0.5, 0);
       ctx.lineTo(Math.round(x) + 0.5, y - 2);
       ctx.stroke();
 
-      // Etiqueta de texto: solo si hay espacio suficiente desde la ultima
       if (x - lastLabelX < minGap) continue;
       lastLabelX = x;
 
+      // Cambio de dia -> "dia MM-DD" (ej: "mié 04-01"); si no, la hora.
       const label = a.is_new_day
-        ? a.time.slice(5, 10)               // MM-DD
+        ? (diaSemana(a.time) + " " + a.time.slice(5, 10))
         : String(a.hour).padStart(2, "0") + ":00";
       ctx.fillStyle = a.is_new_day ? "#d1d4dc" : "#868993";
       ctx.fillText(label, x, y);
