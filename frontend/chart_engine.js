@@ -36,6 +36,17 @@ class ChartEngine {
     this.pricePanel = new PricePanel(els.priceCanvas, this.priceScale);
     this.atrPanel   = new ATRPanel(els.atrCanvas, this.atrScale);
     this._lastBarW = 8;
+    this.mode = "auto";
+  }
+  set_mode(mode) {
+    this.mode = mode;
+    if (mode === "auto") {
+      this.price_auto = true;
+      this.atr_auto   = true;
+      if (this.offset < 0) this.offset = 0;
+    }
+    this._clamp_offset();
+    this.request_render();
   }
   set_market(market) { this.market = market; }
   round(v) { return Math.round(v); }
@@ -57,7 +68,7 @@ class ChartEngine {
     const n      = this.market.candles.length;
     const count  = Math.min(this.visible_bars, n);
     const maxOff = Math.max(0, n - 2);
-    const minOff = -(count - 2);
+    const minOff = this.mode === "auto" ? 0 : -(count - 2);
     if (this.offset < minOff) this.offset = minOff;
     if (this.offset > maxOff) this.offset = maxOff;
   }
@@ -128,6 +139,18 @@ class ChartEngine {
     }
   }
   bind_events() {
+    // Botones de modo (Auto / Manual)
+    const btnAuto   = document.getElementById("btn-auto");
+    const btnManual = document.getElementById("btn-manual");
+    if (btnAuto && btnManual) {
+      const syncBtns = () => {
+        btnAuto  .classList.toggle("active", this.mode === "auto");
+        btnManual.classList.toggle("active", this.mode === "manual");
+      };
+      btnAuto  .addEventListener("click", () => { this.set_mode("auto");   syncBtns(); });
+      btnManual.addEventListener("click", () => { this.set_mode("manual"); syncBtns(); });
+    }
+
     const cvs = [this.els.priceCanvas, this.els.atrCanvas];
     this.els.priceCanvas.addEventListener("mousedown", (e) => this._on_mouse_down(e, "price"));
     this.els.atrCanvas.addEventListener("mousedown",   (e) => this._on_mouse_down(e, "atr"));
@@ -144,17 +167,19 @@ class ChartEngine {
   _on_mouse_down(e, panel) {
     if (e.button === 0) {
       this._dragX = true; this._startX = e.clientX; this._startOff = this.offset;
+      if (this.mode === "manual") {
+        this._dragYPanel = panel;
+        this._dragY = true; this._startY = e.clientY;
+        if (panel === "atr") {
+          this._enter_manual_atr_mode();
+          this._startPMin = this.atr_min; this._startPMax = this.atr_max;
+        } else {
+          this._enter_manual_mode();
+          this._startPMin = this.price_min; this._startPMax = this.price_max;
+        }
+      }
     } else if (e.button === 2) {
       e.preventDefault();
-      this._dragYPanel = panel;
-      this._dragY = true; this._startY = e.clientY;
-      if (panel === "atr") {
-        this._enter_manual_atr_mode();
-        this._startPMin = this.atr_min; this._startPMax = this.atr_max;
-      } else {
-        this._enter_manual_mode();
-        this._startPMin = this.price_min; this._startPMax = this.price_max;
-      }
     }
   }
   _on_canvas_move(e, cv) {
@@ -196,12 +221,11 @@ class ChartEngine {
     e.preventDefault();
     const rect   = e.currentTarget.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
-    // Shift OR cursor sobre eje Y → zoom vertical del panel correspondiente
+    // Shift OR cursor sobre eje Y → zoom vertical (solo modo manual)
     if (e.shiftKey || mouseX > this.priceScale.plot_width) {
-      if (panel === "atr") {
-        this._vertical_zoom_atr(e.deltaY);
-      } else {
-        this._vertical_zoom(e.deltaY);
+      if (this.mode === "manual") {
+        if (panel === "atr") { this._vertical_zoom_atr(e.deltaY); }
+        else                 { this._vertical_zoom(e.deltaY); }
       }
     // Ctrl → zoom horizontal centrado en la vista (no en cursor)
     } else if (e.ctrlKey) {
@@ -320,7 +344,7 @@ class ChartEngine {
     const win = this.compute_window();
     if (this.els.statusWindow) {
       this.els.statusWindow.textContent =
-        `TF ${this.market.timeframe} | barras ${win.count} | offset ${this.offset}`;
+        `TF ${this.market.timeframe} | ${this.mode} | barras ${win.count} | offset ${this.offset}`;
     }
     if (this.els.statusHover) {
       if (this._hoverIndex !== null &&

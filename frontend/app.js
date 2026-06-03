@@ -60,6 +60,17 @@ function init() {
     btn.addEventListener("click", () => changeTimeframe(btn.dataset.tf));
   });
 
+  // --- Botones de modo Auto / Manual ---
+  const btnAuto   = document.getElementById("btn-auto");
+  const btnManual = document.getElementById("btn-manual");
+  function setMode(mode) {
+    App.engine.set_mode(mode);
+    btnAuto  .classList.toggle("active", mode === "auto");
+    btnManual.classList.toggle("active", mode === "manual");
+  }
+  btnAuto  .addEventListener("click", () => setMode("auto"));
+  btnManual.addEventListener("click", () => setMode("manual"));
+
   // --- Boton Reset ---
   document.getElementById("btn-reset")
     .addEventListener("click", () => App.engine.reset_view());

@@ -80,3 +80,19 @@ body {
 #statusbar .spacer { flex: 1 1 auto; }
 #statusbar.hidden { display: none; }
 #status-hover { color: #d1d4dc; }
+
+/* ---------- Botones de modo ---------- */
+.mode-group { display: flex; }
+.mode-btn {
+  background: #2a2e39;
+  color: #868993;
+  border: 1px solid #363a45;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.mode-btn:first-child { border-radius: 4px 0 0 4px; }
+.mode-btn:last-child  { border-radius: 0 4px 4px 0; border-left: none; }
+.mode-btn:hover       { background: #363a45; color: #d1d4dc; }
+.mode-btn.active      { background: #2962ff !important; border-color: #2962ff; color: #fff !important; }
