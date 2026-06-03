@@ -162,22 +162,30 @@ sub compute_time_anchors {
     my $arr = $self->_active_array;
     my @anchors;
 
-    my ($prev_hour, $prev_day) = (-1, '');
+    # Intervalo de anchor segun timeframe
+    my $tf       = $self->{timeframe};
+    my $interval = $tf eq '1m'  ? 10
+                 : $tf eq '5m'  ? 20
+                 :                60;   # 15m -> cada hora
+
+    my ($prev_bucket, $prev_day) = (-1, '');
     for my $i (0 .. $#$arr) {
         my $ts = $arr->[$i]{time};
-        my ($Y, $M, $D, $h) = $ts =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2})/;
-        next unless defined $h;
+        my ($Y, $M, $D, $h, $mi) = $ts =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/;
+        next unless defined $mi;
 
-        my $day = "$Y-$M-$D";
-        if ($h != $prev_hour || $day ne $prev_day) {
+        my $day    = "$Y-$M-$D";
+        my $bucket = int(($h * 60 + $mi) / $interval);
+
+        if ($bucket != $prev_bucket || $day ne $prev_day) {
             push @anchors, {
                 index      => $i,
                 time       => $ts,
                 hour       => $h + 0,
                 is_new_day => ($day ne $prev_day) ? 1 : 0,
             };
-            $prev_hour = $h + 0;
-            $prev_day  = $day;
+            $prev_bucket = $bucket;
+            $prev_day    = $day;
         }
     }
     return \@anchors;

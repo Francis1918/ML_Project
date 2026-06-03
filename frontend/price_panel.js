@@ -72,29 +72,40 @@ class PricePanel {
     ctx.textBaseline = "top";
     ctx.textAlign = "center";
 
-    const minGap = 60;
-    let lastLabelX = -Infinity;
+    // Días tienen prioridad: umbral independiente y más pequeño.
+    // Horas/subhoras necesitan espacio desde cualquier etiqueta anterior.
+    const minGapDay = 50;
+    const minGapSub = 55;
+    let lastDayX = -Infinity;
+    let lastAnyX = -Infinity;
 
     for (const a of anchors) {
       if (a.index < firstIndex || a.index > lastIndex) continue;
       const x = s.index_to_center_x(a.index);
       if (x < 0 || x > s.plot_width) continue;
 
+      // Línea vertical para todos los anchors
       ctx.strokeStyle = "#1c212e";
+      ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(Math.round(x) + 0.5, 0);
       ctx.lineTo(Math.round(x) + 0.5, y - 2);
       ctx.stroke();
 
-      if (x - lastLabelX < minGap) continue;
-      lastLabelX = x;
-
-      // Cambio de dia -> "dia MM-DD" (ej: "mié 04-01"); si no, la hora.
-      const label = a.is_new_day
-        ? (diaSemana(a.time) + " " + a.time.slice(5, 10))
-        : String(a.hour).padStart(2, "0") + ":00";
-      ctx.fillStyle = a.is_new_day ? "#d1d4dc" : "#868993";
-      ctx.fillText(label, x, y);
+      if (a.is_new_day) {
+        if (x - lastDayX < minGapDay) continue;
+        lastDayX = x;
+        lastAnyX = x;
+        ctx.fillStyle = "#d1d4dc";
+        ctx.fillText(diaSemana(a.time) + " " + a.time.slice(5, 10), x, y);
+      } else {
+        if (x - lastAnyX < minGapSub) continue;
+        lastAnyX = x;
+        // Hora en punto más brillante que sub-hora
+        const isHour = a.time.slice(14, 16) === "00";
+        ctx.fillStyle = isHour ? "#a8aab4" : "#868993";
+        ctx.fillText(a.time.slice(11, 16), x, y);
+      }
     }
   }
 }
