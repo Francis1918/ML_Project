@@ -220,12 +220,10 @@ class ChartEngine {
     e.preventDefault();
     const rect   = e.currentTarget.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
-    // Shift OR cursor sobre eje Y → zoom vertical (solo modo manual)
+    // Cursor sobre eje Y o Shift → zoom vertical (siempre disponible)
     if (e.shiftKey || mouseX > this.priceScale.plot_width) {
-      if (this.mode === "manual") {
-        if (panel === "atr") { this._vertical_zoom_atr(e.deltaY); }
-        else                 { this._vertical_zoom(e.deltaY); }
-      }
+      if (panel === "atr") { this._vertical_zoom_atr(e.deltaY); }
+      else                 { this._vertical_zoom(e.deltaY);     }
     // Ctrl → zoom horizontal centrado en la vista (no en cursor)
     } else if (e.ctrlKey) {
       this._horizontal_zoom(e.deltaY, this.priceScale.plot_width / 2);
