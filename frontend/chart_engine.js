@@ -224,26 +224,49 @@ class ChartEngine {
     if (e.shiftKey || mouseX > this.priceScale.plot_width) {
       if (panel === "atr") { this._vertical_zoom_atr(e.deltaY); }
       else                 { this._vertical_zoom(e.deltaY);     }
-    // Ctrl → zoom horizontal centrado en la vista (no en cursor)
+    // Ctrl → zoom anclado al crosshair (pivote en la vela apuntada)
     } else if (e.ctrlKey) {
-      this._horizontal_zoom(e.deltaY, this.priceScale.plot_width / 2);
+      this._zoom_at_cursor(e.deltaY, mouseX);
     } else {
       this._horizontal_zoom(e.deltaY, mouseX);
     }
   }
   _horizontal_zoom(delta, mouseX) {
-    const win = this.compute_window();
-    const idxUnderCursor = win.virtualFirst + mouseX / this._lastBarW;
+    const win    = this.compute_window();
     const factor = delta > 0 ? 1.1 : 1 / 1.1;
     this.visible_bars = Math.round(this.visible_bars * factor);
     this._clamp_bars();
-    const plotW = this.priceScale.plot_width ||
-                  (this.els.priceCanvas.getBoundingClientRect().width - PRICE_AXIS_W);
-    const newBarW = plotW / Math.min(this.visible_bars, this.market.candles.length);
+    if (this.mode === "auto") {
+      // En auto: solo cambia el nivel de zoom, el offset no se mueve
+      // para que la ultima vela permanezca siempre visible a la derecha.
+      this.offset = Math.max(0, this.offset);
+    } else {
+      // En manual: anclar el zoom al bar que esta bajo el cursor.
+      const idxUnderCursor = win.virtualFirst + mouseX / this._lastBarW;
+      const plotW    = this.priceScale.plot_width ||
+                       (this.els.priceCanvas.getBoundingClientRect().width - PRICE_AXIS_W);
+      const newBarW  = plotW / Math.min(this.visible_bars, this.market.candles.length);
+      const newFirst = idxUnderCursor - mouseX / newBarW;
+      const n        = this.market.candles.length;
+      const count    = Math.min(this.visible_bars, n);
+      this.offset    = Math.round((n - 1) - count + 1 - newFirst);
+    }
+    this._clamp_offset();
+    this.request_render();
+  }
+  _zoom_at_cursor(delta, mouseX) {
+    const win            = this.compute_window();
+    const idxUnderCursor = win.virtualFirst + mouseX / this._lastBarW;
+    const factor         = delta > 0 ? 1.1 : 1 / 1.1;
+    this.visible_bars    = Math.round(this.visible_bars * factor);
+    this._clamp_bars();
+    const plotW   = this.priceScale.plot_width ||
+                    (this.els.priceCanvas.getBoundingClientRect().width - PRICE_AXIS_W);
+    const newBarW  = plotW / Math.min(this.visible_bars, this.market.candles.length);
     const newFirst = idxUnderCursor - mouseX / newBarW;
-    const n = this.market.candles.length;
-    const count = Math.min(this.visible_bars, n);
-    this.offset = Math.round((n - 1) - count + 1 - newFirst);
+    const n        = this.market.candles.length;
+    const count    = Math.min(this.visible_bars, n);
+    this.offset    = Math.round((n - 1) - count + 1 - newFirst);
     this._clamp_offset();
     this.request_render();
   }
