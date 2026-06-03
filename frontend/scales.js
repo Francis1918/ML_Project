@@ -50,19 +50,35 @@ class Scales {
   }
 
   // ---------- Dibujo del eje vertical (precios / valores) ----------
-  // Dibuja ~5 etiquetas. Las de los extremos se "meten" hacia adentro
-  // para que el texto no quede cortado por el borde del canvas.
+  // Ticks siempre en múltiplos de 0.25 (snap a paso limpio).
   draw_y_scale(ctx, formatter) {
-    const ticks = 5;
+    const range = this.max_value - this.min_value;
+    if (range <= 0) return;
+
+    // Paso limpio: normalizar a múltiplos de 0.25
+    // (raw/5 → ×4 → mag de 10 → nice 1/2/5/10 → /4)
+    const rawStep = range / 5;
+    const raw4    = rawStep * 4;
+    const mag     = Math.pow(10, Math.floor(Math.log10(raw4 || 1)));
+    const norm    = raw4 / mag;
+    let niceNorm;
+    if      (norm <= 1) niceNorm = 1;
+    else if (norm <= 2) niceNorm = 2;
+    else if (norm <= 5) niceNorm = 5;
+    else                niceNorm = 10;
+    const step = (niceNorm * mag) / 4;
+
     ctx.font = "11px -apple-system, Arial, sans-serif";
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
 
-    for (let i = 0; i <= ticks; i++) {
-      const value = this.min_value + (this.max_value - this.min_value) * (i / ticks);
-      const yRaw  = this.value_to_y(value);
+    const firstIdx = Math.ceil(this.min_value / step);
+    for (let i = firstIdx; ; i++) {
+      const v    = Math.round(i * step * 1e9) / 1e9;
+      if (v > this.max_value + step * 0.01) break;
+      const yRaw = this.value_to_y(v);
+      if (yRaw < 0 || yRaw > this.height) continue;
 
-      // Cuadricula horizontal (en la posicion real del valor)
       ctx.strokeStyle = "#1c212e";
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -70,13 +86,12 @@ class Scales {
       ctx.lineTo(this.plot_width, Math.round(yRaw) + 0.5);
       ctx.stroke();
 
-      // Texto: lo limitamos para que no se corte arriba ni abajo
       let yText = yRaw;
-      if (yText < 8) yText = 8;
+      if (yText < 8)              yText = 8;
       if (yText > this.height - 8) yText = this.height - 8;
 
       ctx.fillStyle = "#868993";
-      ctx.fillText(formatter(value), this.plot_width + 6, yText);
+      ctx.fillText(formatter(v), this.plot_width + 6, yText);
     }
   }
 }

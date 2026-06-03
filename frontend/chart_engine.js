@@ -42,18 +42,19 @@ class ChartEngine {
     requestAnimationFrame(() => { this._renderPending = false; this.render(); });
   }
   compute_window() {
-    const n = this.market.candles.length;
-    const count = Math.min(this.visible_bars, n);
-    let last = n - 1 - this.offset;
-    let first = last - count + 1;
-    if (last > n - 1) last = n - 1;
-    if (first < 0) first = 0;
-    return { first, last, count: last - first + 1 };
+    const n            = this.market.candles.length;
+    const count        = Math.min(this.visible_bars, n);
+    const virtualLast  = n - 1 - this.offset;
+    const virtualFirst = virtualLast - count + 1;
+    const first = Math.max(0, Math.min(n - 1, virtualFirst));
+    const last  = Math.max(0, Math.min(n - 1, virtualLast));
+    return { first, last, virtualFirst, count };
   }
   _clamp_offset() {
-    const n = this.market.candles.length;
-    const maxOff = Math.max(0, n - this.visible_bars);
-    if (this.offset < 0) this.offset = 0;
+    const n      = this.market.candles.length;
+    const maxOff = Math.max(0, n - 2);
+    const minOff = -(this.visible_bars - 2);
+    if (this.offset < minOff) this.offset = minOff;
     if (this.offset > maxOff) this.offset = maxOff;
   }
   _clamp_bars() {
@@ -88,7 +89,7 @@ class ChartEngine {
       yMin = yr.min; yMax = yr.max;
     } else { yMin = this.price_min; yMax = this.price_max; }
     this.priceScale.set_size(sizeP.w, sizeP.h, plotW);
-    this.priceScale.set_x_window(win.first, barW);
+    this.priceScale.set_x_window(win.virtualFirst, barW);
     this.priceScale.set_y_range(yMin, yMax);
     this.pricePanel.render(candles, win.first);
     const sizeA = this._fit_canvas(this.els.atrCanvas);
@@ -96,7 +97,7 @@ class ChartEngine {
     const atrSlice = this.market.atr.slice(win.first, win.last + 1);
     const yrA = this.atrPanel.get_y_range(atrSlice);
     this.atrScale.set_size(sizeA.w, plotH, plotW);
-    this.atrScale.set_x_window(win.first, barW);
+    this.atrScale.set_x_window(win.virtualFirst, barW);
     this.atrScale.set_y_range(yrA.min, yrA.max);
     this.atrPanel.render(atrSlice, win.first);
     this.pricePanel.draw_time_axis(
@@ -168,13 +169,21 @@ class ChartEngine {
   _on_mouse_up(e) { this._dragX = false; this._dragY = false; }
   _on_wheel(e) {
     e.preventDefault();
-    const rect = e.currentTarget.getBoundingClientRect();
-    if (e.shiftKey) { this._vertical_zoom(e.deltaY); }
-    else { this._horizontal_zoom(e.deltaY, e.clientX - rect.left); }
+    const rect   = e.currentTarget.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    // Shift OR cursor sobre eje Y → zoom vertical
+    if (e.shiftKey || mouseX > this.priceScale.plot_width) {
+      this._vertical_zoom(e.deltaY);
+    // Ctrl → zoom horizontal centrado en la vista (no en cursor)
+    } else if (e.ctrlKey) {
+      this._horizontal_zoom(e.deltaY, this.priceScale.plot_width / 2);
+    } else {
+      this._horizontal_zoom(e.deltaY, mouseX);
+    }
   }
   _horizontal_zoom(delta, mouseX) {
     const win = this.compute_window();
-    const idxUnderCursor = win.first + mouseX / this._lastBarW;
+    const idxUnderCursor = win.virtualFirst + mouseX / this._lastBarW;
     const factor = delta > 0 ? 1.1 : 1 / 1.1;
     this.visible_bars = Math.round(this.visible_bars * factor);
     this._clamp_bars();
@@ -203,13 +212,61 @@ class ChartEngine {
     if (this._hoverIndex < win.first || this._hoverIndex > win.last) return;
     const cx = this.priceScale.index_to_center_x(this._hoverIndex);
     if (cx < 0 || cx > this.priceScale.plot_width) return;
-    this._draw_vline(this.els.priceCanvas.getContext("2d"), cx, this.priceScale.height);
-    this._draw_vline(this.els.atrCanvas.getContext("2d"), cx, this.atrScale.height);
+
+    const priceCtx = this.els.priceCanvas.getContext("2d");
+    const atrCtx   = this.els.atrCanvas.getContext("2d");
+
+    this._draw_vline(priceCtx, cx, this.priceScale.height);
+    this._draw_vline(atrCtx,   cx, this.atrScale.height);
+
     if (this._mouse.panel === "price") {
-      this._draw_hline(this.els.priceCanvas.getContext("2d"), this._mouse.y, this.priceScale.plot_width);
+      this._draw_hline(priceCtx, this._mouse.y, this.priceScale.plot_width);
+      // Caja de precio sobre eje Y
+      const price = this.priceScale.y_to_value(this._mouse.y);
+      this._draw_y_label(priceCtx, this._mouse.y, this.priceScale, price.toFixed(2));
     } else {
-      this._draw_hline(this.els.atrCanvas.getContext("2d"), this._mouse.y, this.atrScale.plot_width);
+      this._draw_hline(atrCtx, this._mouse.y, this.atrScale.plot_width);
+      // Caja de valor ATR sobre eje Y
+      const atrVal = this.atrScale.y_to_value(this._mouse.y);
+      this._draw_y_label(atrCtx, this._mouse.y, this.atrScale, atrVal.toFixed(2));
     }
+
+    // Etiqueta temporal (siempre, en el eje de tiempo del panel ATR)
+    const c = this.market.candles[this._hoverIndex];
+    if (c) {
+      const label = `${diaSemana(c.time)} ${c.time.slice(5, 10)} ${c.time.slice(11, 16)}`;
+      this._draw_x_label(atrCtx, cx, label);
+    }
+  }
+  _draw_y_label(ctx, y, scale, label) {
+    const x = scale.plot_width;
+    const w = scale.width - x;
+    if (w <= 2) return;
+    const h = 16;
+    ctx.save();
+    ctx.fillStyle = "#758696";
+    ctx.fillRect(x, Math.round(y) - h / 2, w, h);
+    ctx.fillStyle = "#fff";
+    ctx.font = "11px -apple-system, Arial, sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillText(label, x + 4, Math.round(y));
+    ctx.restore();
+  }
+  _draw_x_label(ctx, x, label) {
+    const w     = 104;
+    const h     = TIME_AXIS_H - 2;
+    const plotH = this.atrScale.height;
+    if (x < w / 2 || x > this.atrScale.plot_width - w / 2) return;
+    ctx.save();
+    ctx.fillStyle = "#758696";
+    ctx.fillRect(Math.round(x) - w / 2, plotH + 1, w, h);
+    ctx.fillStyle = "#fff";
+    ctx.font = "11px -apple-system, Arial, sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    ctx.fillText(label, Math.round(x), plotH + 1 + h / 2);
+    ctx.restore();
   }
   _draw_vline(ctx, x, h) {
     ctx.save(); ctx.strokeStyle = "#758696"; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
