@@ -22,7 +22,10 @@ class ChartEngine {
     this.price_auto = true;
     this.price_min  = null;
     this.price_max  = null;
-    this._dragX = false; this._dragY = false;
+    this.atr_auto = true;
+    this.atr_min  = null;
+    this.atr_max  = null;
+    this._dragX = false; this._dragY = false; this._dragYPanel = null;
     this._startX = 0; this._startY = 0; this._startOff = 0;
     this._startPMin = 0; this._startPMax = 0;
     this._renderPending = false;
@@ -95,7 +98,9 @@ class ChartEngine {
     const sizeA = this._fit_canvas(this.els.atrCanvas);
     const plotH = sizeA.h - TIME_AXIS_H;
     const atrSlice = this.market.atr.slice(win.first, win.last + 1);
-    const yrA = this.atrPanel.get_y_range(atrSlice);
+    const yrA = this.atr_auto
+      ? this.atrPanel.get_y_range(atrSlice)
+      : { min: this.atr_min, max: this.atr_max };
     this.atrScale.set_size(sizeA.w, plotH, plotW);
     this.atrScale.set_x_window(win.virtualFirst, barW);
     this.atrScale.set_y_range(yrA.min, yrA.max);
@@ -114,12 +119,20 @@ class ChartEngine {
       this.price_max = this.priceScale.max_value;
     }
   }
+  _enter_manual_atr_mode() {
+    if (this.atr_auto) {
+      this.atr_auto = false;
+      this.atr_min = this.atrScale.min_value;
+      this.atr_max = this.atrScale.max_value;
+    }
+  }
   bind_events() {
     const cvs = [this.els.priceCanvas, this.els.atrCanvas];
-    this.els.priceCanvas.addEventListener("mousedown", (e) => this._on_mouse_down(e));
-    this.els.atrCanvas.addEventListener("mousedown", (e) => this._on_mouse_down(e));
+    this.els.priceCanvas.addEventListener("mousedown", (e) => this._on_mouse_down(e, "price"));
+    this.els.atrCanvas.addEventListener("mousedown",   (e) => this._on_mouse_down(e, "atr"));
+    this.els.priceCanvas.addEventListener("wheel", (e) => this._on_wheel(e, "price"), { passive: false });
+    this.els.atrCanvas.addEventListener("wheel",   (e) => this._on_wheel(e, "atr"),   { passive: false });
     for (const cv of cvs) {
-      cv.addEventListener("wheel", (e) => this._on_wheel(e), { passive: false });
       cv.addEventListener("contextmenu", (e) => e.preventDefault());
       cv.addEventListener("mousemove", (e) => this._on_canvas_move(e, cv));
       cv.addEventListener("mouseleave", () => this._on_canvas_leave());
@@ -127,14 +140,20 @@ class ChartEngine {
     window.addEventListener("mousemove", (e) => this._on_mouse_move(e));
     window.addEventListener("mouseup", (e) => this._on_mouse_up(e));
   }
-  _on_mouse_down(e) {
+  _on_mouse_down(e, panel) {
     if (e.button === 0) {
       this._dragX = true; this._startX = e.clientX; this._startOff = this.offset;
     } else if (e.button === 2) {
       e.preventDefault();
-      this._enter_manual_mode();
+      this._dragYPanel = panel;
       this._dragY = true; this._startY = e.clientY;
-      this._startPMin = this.price_min; this._startPMax = this.price_max;
+      if (panel === "atr") {
+        this._enter_manual_atr_mode();
+        this._startPMin = this.atr_min; this._startPMax = this.atr_max;
+      } else {
+        this._enter_manual_mode();
+        this._startPMin = this.price_min; this._startPMax = this.price_max;
+      }
     }
   }
   _on_canvas_move(e, cv) {
@@ -158,22 +177,31 @@ class ChartEngine {
       this.request_render();
     }
     if (this._dragY) {
-      const range = this._startPMax - this._startPMin;
-      const dyFrac = (e.clientY - this._startY) / (this.priceScale.height || 1);
-      const shift = dyFrac * range;
-      this.price_min = this._startPMin + shift;
-      this.price_max = this._startPMax + shift;
+      const range  = this._startPMax - this._startPMin;
+      const scaleH = this._dragYPanel === "atr" ? this.atrScale.height : this.priceScale.height;
+      const shift  = (e.clientY - this._startY) / (scaleH || 1) * range;
+      if (this._dragYPanel === "atr") {
+        this.atr_min = this._startPMin + shift;
+        this.atr_max = this._startPMax + shift;
+      } else {
+        this.price_min = this._startPMin + shift;
+        this.price_max = this._startPMax + shift;
+      }
       this.request_render();
     }
   }
   _on_mouse_up(e) { this._dragX = false; this._dragY = false; }
-  _on_wheel(e) {
+  _on_wheel(e, panel) {
     e.preventDefault();
     const rect   = e.currentTarget.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
-    // Shift OR cursor sobre eje Y → zoom vertical
+    // Shift OR cursor sobre eje Y → zoom vertical del panel correspondiente
     if (e.shiftKey || mouseX > this.priceScale.plot_width) {
-      this._vertical_zoom(e.deltaY);
+      if (panel === "atr") {
+        this._vertical_zoom_atr(e.deltaY);
+      } else {
+        this._vertical_zoom(e.deltaY);
+      }
     // Ctrl → zoom horizontal centrado en la vista (no en cursor)
     } else if (e.ctrlKey) {
       this._horizontal_zoom(e.deltaY, this.priceScale.plot_width / 2);
@@ -200,10 +228,19 @@ class ChartEngine {
   _vertical_zoom(delta) {
     this._enter_manual_mode();
     const center = (this.price_min + this.price_max) / 2;
-    const half = (this.price_max - this.price_min) / 2;
+    const half   = (this.price_max - this.price_min) / 2;
     const factor = delta > 0 ? 1.1 : 1 / 1.1;
     this.price_min = center - half * factor;
     this.price_max = center + half * factor;
+    this.request_render();
+  }
+  _vertical_zoom_atr(delta) {
+    this._enter_manual_atr_mode();
+    const center = (this.atr_min + this.atr_max) / 2;
+    const half   = (this.atr_max - this.atr_min) / 2;
+    const factor = delta > 0 ? 1.1 : 1 / 1.1;
+    this.atr_min = center - half * factor;
+    this.atr_max = center + half * factor;
     this.request_render();
   }
   _draw_crosshair_all() {
@@ -304,6 +341,7 @@ class ChartEngine {
     this.visible_bars = 120;
     this.offset = 0;
     this.price_auto = true;
+    this.atr_auto   = true;
     this.request_render();
   }
 }
