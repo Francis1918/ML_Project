@@ -55,8 +55,9 @@ class ChartEngine {
   }
   _clamp_offset() {
     const n      = this.market.candles.length;
+    const count  = Math.min(this.visible_bars, n);
     const maxOff = Math.max(0, n - 2);
-    const minOff = -(this.visible_bars - 2);
+    const minOff = -(count - 2);
     if (this.offset < minOff) this.offset = minOff;
     if (this.offset > maxOff) this.offset = maxOff;
   }
