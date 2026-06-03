@@ -43,7 +43,6 @@ class ChartEngine {
     if (mode === "auto") {
       this.price_auto = true;
       this.atr_auto   = true;
-      if (this.offset < 0) this.offset = 0;
     }
     this._clamp_offset();
     this.request_render();
@@ -68,7 +67,7 @@ class ChartEngine {
     const n      = this.market.candles.length;
     const count  = Math.min(this.visible_bars, n);
     const maxOff = Math.max(0, n - 2);
-    const minOff = this.mode === "auto" ? 0 : -(count - 2);
+    const minOff = -(count - 2);
     if (this.offset < minOff) this.offset = minOff;
     if (this.offset > maxOff) this.offset = maxOff;
   }
