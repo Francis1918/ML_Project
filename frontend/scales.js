@@ -50,34 +50,40 @@ class Scales {
   }
 
   // ---------- Dibujo del eje vertical (precios / valores) ----------
-  // Ticks siempre en múltiplos de 0.25 (snap a paso limpio).
   draw_y_scale(ctx, formatter) {
     const range = this.max_value - this.min_value;
     if (range <= 0) return;
 
-    // Paso limpio: normalizar a múltiplos de 0.25
-    // (raw/5 → ×4 → mag de 10 → nice 1/2/5/10 → /4)
-    const rawStep = range / 5;
-    const raw4    = rawStep * 4;
-    const mag     = Math.pow(10, Math.floor(Math.log10(raw4 || 1)));
-    const norm    = raw4 / mag;
+    // Cantidad de divisiones proporcional a la altura del panel:
+    // ~1 tick cada 28px, mínimo 8, máximo 30.
+    const targetTicks = Math.min(30, Math.max(8, Math.floor(this.height / 28)));
+
+    // Paso limpio: snap a 1 / 2 / 2.5 / 5 / 10 × 10^n
+    const rawStep = range / targetTicks;
+    const mag     = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+    const norm    = rawStep / mag;
     let niceNorm;
-    if      (norm <= 1) niceNorm = 1;
-    else if (norm <= 2) niceNorm = 2;
-    else if (norm <= 5) niceNorm = 5;
-    else                niceNorm = 10;
-    const step = (niceNorm * mag) / 4;
+    if      (norm <= 1)   niceNorm = 1;
+    else if (norm <= 2)   niceNorm = 2;
+    else if (norm <= 2.5) niceNorm = 2.5;
+    else if (norm <= 5)   niceNorm = 5;
+    else                  niceNorm = 10;
+    const step = niceNorm * mag;
 
     ctx.font = "11px -apple-system, Arial, sans-serif";
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
 
     const firstIdx = Math.ceil(this.min_value / step);
+    let lastY = Infinity;
     for (let i = firstIdx; ; i++) {
       const v    = Math.round(i * step * 1e9) / 1e9;
       if (v > this.max_value + step * 0.01) break;
       const yRaw = this.value_to_y(v);
       if (yRaw < 0 || yRaw > this.height) continue;
+      // Evitar solape de etiquetas (mínimo 11px entre líneas)
+      if (lastY - yRaw < 11) continue;
+      lastY = yRaw;
 
       ctx.strokeStyle = "#1c212e";
       ctx.lineWidth = 1;
@@ -87,7 +93,7 @@ class Scales {
       ctx.stroke();
 
       let yText = yRaw;
-      if (yText < 8)              yText = 8;
+      if (yText < 8)               yText = 8;
       if (yText > this.height - 8) yText = this.height - 8;
 
       ctx.fillStyle = "#868993";
