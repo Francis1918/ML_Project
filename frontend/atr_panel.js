@@ -51,4 +51,36 @@ class ATRPanel {
     }
     ctx.stroke();
   }
+
+  draw_last_atr(lastVal) {
+    const s = this.scale;
+    if (lastVal == null || lastVal < s.min_value || lastVal > s.max_value) return;
+    const ctx   = this.ctx;
+    const y     = s.value_to_y(lastVal);
+    const axisX = s.plot_width;
+    const axisW = s.width - axisX;
+    if (axisW < 2) return;
+
+    // Línea horizontal punteada
+    ctx.save();
+    ctx.strokeStyle = this.colorLine;
+    ctx.lineWidth   = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(0, Math.round(y) + 0.5);
+    ctx.lineTo(axisX, Math.round(y) + 0.5);
+    ctx.stroke();
+
+    // Etiqueta en el eje Y
+    const h = 16;
+    ctx.setLineDash([]);
+    ctx.fillStyle = this.colorLine;
+    ctx.fillRect(axisX, Math.round(y) - h / 2, axisW, h);
+    ctx.fillStyle = "#fff";
+    ctx.font = "11px -apple-system, Arial, sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillText(lastVal.toFixed(2), axisX + 4, Math.round(y));
+    ctx.restore();
+  }
 }

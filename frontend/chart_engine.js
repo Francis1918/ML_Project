@@ -106,6 +106,8 @@ class ChartEngine {
     this.priceScale.set_x_window(win.virtualFirst, barW);
     this.priceScale.set_y_range(yMin, yMax);
     this.pricePanel.render(candles, win.first);
+    const lastC = this.market.candles[this.market.candles.length - 1];
+    if (lastC) this.pricePanel.draw_last_price(lastC.close, lastC.open);
     const sizeA = this._fit_canvas(this.els.atrCanvas);
     const plotH = sizeA.h - TIME_AXIS_H;
     const atrSlice = this.market.atr.slice(win.first, win.last + 1);
@@ -116,6 +118,8 @@ class ChartEngine {
     this.atrScale.set_x_window(win.virtualFirst, barW);
     this.atrScale.set_y_range(yrA.min, yrA.max);
     this.atrPanel.render(atrSlice, win.first);
+    const lastATR = this.market.atr[this.market.atr.length - 1];
+    if (lastATR != null) this.atrPanel.draw_last_atr(lastATR);
     this.pricePanel.draw_time_axis(
       this.els.atrCanvas.getContext("2d"),
       this.market.anchors, win.first, win.last, plotH + 2

@@ -66,6 +66,39 @@ class PricePanel {
     }
   }
 
+  draw_last_price(lastClose, lastOpen) {
+    const s = this.scale;
+    if (lastClose < s.min_value || lastClose > s.max_value) return;
+    const ctx   = this.ctx;
+    const y     = s.value_to_y(lastClose);
+    const color = lastClose >= lastOpen ? this.colorUp : this.colorDown;
+    const axisX = s.plot_width;
+    const axisW = s.width - axisX;
+    if (axisW < 2) return;
+
+    // Línea horizontal punteada
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(0, Math.round(y) + 0.5);
+    ctx.lineTo(axisX, Math.round(y) + 0.5);
+    ctx.stroke();
+
+    // Etiqueta en el eje Y
+    const h = 16;
+    ctx.setLineDash([]);
+    ctx.fillStyle = color;
+    ctx.fillRect(axisX, Math.round(y) - h / 2, axisW, h);
+    ctx.fillStyle = "#fff";
+    ctx.font = "11px -apple-system, Arial, sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillText(lastClose.toFixed(2), axisX + 4, Math.round(y));
+    ctx.restore();
+  }
+
   draw_time_axis(ctx, anchors, firstIndex, lastIndex, y) {
     const s = this.scale;
     ctx.font = "11px -apple-system, Arial, sans-serif";
