@@ -42,32 +42,36 @@ sub build_tf_candles {
     my $base = $self->{data}{'1m'};
     my @out;
 
-    my $i = 0;
-    while ($i < scalar @$base) {
-        my $fin = $i + $n - 1;
-        $fin = scalar(@$base) - 1 if $fin > scalar(@$base) - 1;
+    my ($cur_group, $cur_bucket);
 
-        my $first = $base->[$i];
-        my $agg = {
-            time   => $first->{time},
-            open   => $first->{open},
-            high   => $first->{high},
-            low    => $first->{low},
-            close  => $first->{close},
-            volume => 0,
-        };
+    for my $c (@$base) {
+        my $ts = $c->{time};
+        my ($Y, $Mo, $D, $h, $mi) = $ts =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/;
+        next unless defined $mi;
 
-        for my $j ($i .. $fin) {
-            my $c = $base->[$j];
-            $agg->{high}   = $c->{high} if $c->{high} > $agg->{high};
-            $agg->{low}    = $c->{low}  if $c->{low}  < $agg->{low};
-            $agg->{close}  = $c->{close};
-            $agg->{volume} += $c->{volume};
+        # Alinear al inicio real del intervalo (ej: 5:02 → 5:00 para 5m)
+        my $aligned_min = int($mi / $n) * $n;
+        my $bucket = sprintf("%s-%s-%sT%02d:%02d:00", $Y, $Mo, $D, $h, $aligned_min);
+
+        if (!defined $cur_bucket || $bucket ne $cur_bucket) {
+            push @out, $cur_group if defined $cur_group;
+            $cur_bucket = $bucket;
+            $cur_group  = {
+                time   => $bucket,
+                open   => $c->{open},
+                high   => $c->{high},
+                low    => $c->{low},
+                close  => $c->{close},
+                volume => $c->{volume} // 0,
+            };
+        } else {
+            $cur_group->{high}   = $c->{high} if $c->{high} > $cur_group->{high};
+            $cur_group->{low}    = $c->{low}  if $c->{low}  < $cur_group->{low};
+            $cur_group->{close}  = $c->{close};
+            $cur_group->{volume} += $c->{volume} // 0;
         }
-
-        push @out, $agg;
-        $i += $n;
     }
+    push @out, $cur_group if defined $cur_group;
 
     $self->{data}{$tf} = \@out;
     return;
