@@ -313,10 +313,11 @@ class ChartEngine {
     this._draw_vline(atrCtx,   cx, this.atrScale.height);
 
     if (this._mouse.panel === "price") {
-      this._draw_hline(priceCtx, this._mouse.y, this.priceScale.plot_width);
-      // Caja de precio sobre eje Y
-      const price = this.priceScale.y_to_value(this._mouse.y);
-      this._draw_y_label(priceCtx, this._mouse.y, this.priceScale, price.toFixed(2));
+      const price    = this.priceScale.y_to_value(this._mouse.y);
+      const snapped  = Math.ceil(price * 4 - 1e-9) / 4;
+      const snappedY = this.priceScale.value_to_y(snapped);
+      this._draw_hline(priceCtx, snappedY, this.priceScale.plot_width);
+      this._draw_y_label(priceCtx, snappedY, this.priceScale, snapped.toFixed(2));
     } else {
       this._draw_hline(atrCtx, this._mouse.y, this.atrScale.plot_width);
       // Caja de valor ATR sobre eje Y
