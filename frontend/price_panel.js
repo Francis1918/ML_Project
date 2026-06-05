@@ -99,45 +99,69 @@ class PricePanel {
     ctx.restore();
   }
 
-  draw_time_axis(ctx, anchors, firstIndex, lastIndex, y) {
+  // visibleCount : numero de velas visibles en pantalla
+  // y            : coordenada Y donde empieza la franja del eje de tiempo
+  // timeframe    : "1m" | "5m" | "15m"
+  draw_time_axis(ctx, allCandles, firstIndex, lastIndex, visibleCount, y, timeframe) {
     const s = this.scale;
     ctx.font = "11px -apple-system, Arial, sans-serif";
     ctx.textBaseline = "top";
-    ctx.textAlign = "center";
+    ctx.textAlign    = "center";
 
-    // Días tienen prioridad: umbral independiente y más pequeño.
-    // Horas/subhoras necesitan espacio desde cualquier etiqueta anterior.
-    const minGapDay = 50;
-    const minGapSub = 55;
-    let lastDayX = -Infinity;
-    let lastAnyX = -Infinity;
+    // Intervalo de etiqueta: ideal = (velas_visibles × min_por_vela) / 33
+    // → buscar el siguiente intervalo estandar en la lista.
+    const tfMin = { '1m': 1, '5m': 5, '15m': 15 }[timeframe] || 1;
+    const STD   = [1, 5, 15, 30, 60, 120, 240, 360, 720, 1440];
+    const ideal = (visibleCount * tfMin) / 33;
+    const intervalMin = STD.find(iv => iv >= ideal) || 1440;
 
-    for (const a of anchors) {
-      if (a.index < firstIndex || a.index > lastIndex) continue;
-      const x = s.index_to_center_x(a.index);
+    const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    const minGap = 55;
+    let lastLabelX = -Infinity;
+
+    for (let i = firstIndex; i <= lastIndex; i++) {
+      const c = allCandles[i];
+      if (!c) continue;
+
+      const mt = c.time.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+      if (!mt) continue;
+      const totalMin = +mt[4] * 60 + +mt[5];
+
+      const prevC      = i > 0 ? allCandles[i - 1] : null;
+      const isNewMonth = !prevC || prevC.time.slice(0, 7) !== c.time.slice(0, 7);
+      const isNewDay   = !prevC || prevC.time.slice(0, 10) !== c.time.slice(0, 10);
+      const isInterval = (totalMin % intervalMin) === 0;
+
+      if (!isNewDay && !isInterval) continue;
+
+      const x = s.index_to_center_x(i);
       if (x < 0 || x > s.plot_width) continue;
 
-      // Línea vertical para todos los anchors
+      // Línea vertical de grilla
       ctx.strokeStyle = "#1c212e";
-      ctx.lineWidth = 1;
+      ctx.lineWidth   = 1;
+      ctx.setLineDash([]);
       ctx.beginPath();
       ctx.moveTo(Math.round(x) + 0.5, 0);
       ctx.lineTo(Math.round(x) + 0.5, y - 2);
       ctx.stroke();
 
-      if (a.is_new_day) {
-        if (x - lastDayX < minGapDay) continue;
-        lastDayX = x;
-        lastAnyX = x;
+      // Etiqueta (solo si hay espacio suficiente respecto a la anterior)
+      if (x - lastLabelX < minGap) continue;
+      lastLabelX = x;
+
+      if (isNewMonth) {
+        // Inicio de mes: "Abr 1", "May 15" — más brillante
         ctx.fillStyle = "#d1d4dc";
-        ctx.fillText(diaSemana(a.time) + " " + a.time.slice(5, 10), x, y);
+        ctx.fillText(MESES[+mt[2] - 1] + " " + +mt[3], x, y);
+      } else if (isNewDay) {
+        // Nuevo día (mismo mes): "lun 15" — tono medio
+        ctx.fillStyle = "#a8aab4";
+        ctx.fillText(diaSemana(c.time) + " " + +mt[3], x, y);
       } else {
-        if (x - lastAnyX < minGapSub) continue;
-        lastAnyX = x;
-        // Hora en punto más brillante que sub-hora
-        const isHour = a.time.slice(14, 16) === "00";
-        ctx.fillStyle = isHour ? "#a8aab4" : "#868993";
-        ctx.fillText(a.time.slice(11, 16), x, y);
+        // Marca de hora/minuto: "09:30" — hora en punto más brillante
+        ctx.fillStyle = totalMin % 60 === 0 ? "#a8aab4" : "#868993";
+        ctx.fillText(c.time.slice(11, 16), x, y);
       }
     }
   }

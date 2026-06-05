@@ -122,7 +122,8 @@ class ChartEngine {
     if (lastATR != null) this.atrPanel.draw_last_atr(lastATR);
     this.pricePanel.draw_time_axis(
       this.els.atrCanvas.getContext("2d"),
-      this.market.anchors, win.first, win.last, plotH + 2
+      this.market.candles, win.first, win.last, win.count, plotH + 2,
+      this.market.timeframe
     );
     this._draw_crosshair_all();
     this._update_statusbar();
