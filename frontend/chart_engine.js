@@ -11,7 +11,7 @@ function diaSemana(iso) {
 const PRICE_AXIS_W = 60;
 const TIME_AXIS_H  = 20;
 const MIN_BARS = 2;
-const MAX_BARS = 1500;
+const MAX_BARS = 6000;
 
 class ChartEngine {
   constructor(market, els) {
