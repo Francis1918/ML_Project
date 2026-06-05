@@ -277,8 +277,11 @@ class ChartEngine {
       const newBarW  = plotW / count;
       const newFirst = idxUnderCursor - mouseX / newBarW;
       this.offset = Math.round((n - 1) - count + 1 - newFirst);
+      // Solo evitar que todo el grafico quede invisible; no forzar vista
+      // estandar para que el pivote no se desplace.
+      const maxOff = Math.max(0, n - 2);
+      if (this.offset > maxOff) this.offset = maxOff;
     }
-    this._clamp_offset();
     this.request_render();
   }
   _vertical_zoom(delta) {
