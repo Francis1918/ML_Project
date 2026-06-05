@@ -390,8 +390,9 @@ class ChartEngine {
         const dow   = diaSemana(c.time);
         const fecha = c.time.slice(0, 10);
         const hora  = c.time.slice(11, 16);
+        const volTxt = c.volume != null ? c.volume.toLocaleString() : "-";
         this.els.statusHover.textContent =
-          `${dow} ${fecha} ${hora}  O:${c.open} H:${c.high} L:${c.low} C:${c.close}  ATR:${atrTxt}`;
+          `${dow} ${fecha} ${hora}  O:${c.open} H:${c.high} L:${c.low} C:${c.close}  Vol:${volTxt}  ATR:${atrTxt}`;
       } else {
         this.els.statusHover.textContent = "Mueve el cursor sobre el grafico...";
       }

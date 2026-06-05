@@ -33,18 +33,36 @@ class PricePanel {
   }
 
   render(candles, firstIndex) {
-    const ctx = this.ctx;
-    const s   = this.scale;
+    const ctx   = this.ctx;
+    const s     = this.scale;
+    const bodyW = Math.max(1, s.bar_width * 0.7);
 
     ctx.fillStyle = this.colorBg;
     ctx.fillRect(0, 0, s.width, s.height);
 
     s.draw_y_scale(ctx, (v) => v.toFixed(2));
 
-    const bodyW = Math.max(1, s.bar_width * 0.7);
+    // Barras de volumen (detrás de las velas, zona inferior 20% del panel)
+    let maxVol = 0;
+    for (const c of candles) if (c.volume > maxVol) maxVol = c.volume;
+    if (maxVol > 0) {
+      const maxH = s.height * 0.20;
+      ctx.save();
+      ctx.globalAlpha = 0.45;
+      for (let k = 0; k < candles.length; k++) {
+        const c    = candles[k];
+        const cx   = s.index_to_center_x(firstIndex + k);
+        const barH = (c.volume / maxVol) * maxH;
+        ctx.fillStyle = c.close >= c.open ? this.colorUp : this.colorDown;
+        ctx.fillRect(cx - bodyW / 2, s.height - barH, bodyW, barH);
+      }
+      ctx.restore();
+    }
+
+    // Velas
     for (let k = 0; k < candles.length; k++) {
-      const c   = candles[k];
-      const cx  = s.index_to_center_x(firstIndex + k);
+      const c     = candles[k];
+      const cx    = s.index_to_center_x(firstIndex + k);
       const isUp  = c.close >= c.open;
       const color = isUp ? this.colorUp : this.colorDown;
 
