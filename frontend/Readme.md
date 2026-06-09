@@ -72,9 +72,20 @@ proyecto-trading-ml/
 
 ## 2. Cómo ejecutar el proyecto
 
-**Requisitos (Fedora):** `perl` (de fábrica), `Mojolicious` (`sudo cpanm Mojolicious`) y un navegador.
+**Requisitos (Fedora/WSL Fedora):** `perl`, `cpanminus` (`sudo dnf install perl-App-cpanminus`) y un navegador en Windows.
+Las dependencias Perl del proyecto se instalan desde `cpanfile`.
 
-**Forma simple (recomendada):**
+**Forma recomendada en VSCode + WSL Fedora:**
+
+1. Abrir la paleta de comandos de VSCode: `Ctrl + Shift + P`.
+2. Ejecutar `Tasks: Run Task`.
+3. Elegir `Trading Chart: Instalar dependencias` la primera vez.
+4. Elegir `Trading Chart: Iniciar` para levantar el servidor y abrir el navegador.
+5. Elegir `Trading Chart: Cerrar` para detener el servidor.
+
+El navegador se abre en Windows en `http://localhost:3000`.
+
+**Forma simple por terminal:**
 
 ```bash
 ./start.sh          # arranca el servidor y abre el navegador en http://localhost:3000
