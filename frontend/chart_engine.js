@@ -239,7 +239,7 @@ class ChartEngine {
   _horizontal_zoom(delta, mouseX) {
     const win      = this.compute_window();
     const prevBars = this.visible_bars;
-    const factor   = delta > 0 ? 1.15 : 1 / 1.15;
+    const factor   = delta > 0 ? 1.6 : 1 / 1.6;
     this.visible_bars = factor < 1
       ? Math.floor(this.visible_bars * factor)
       : Math.ceil(this.visible_bars * factor);
@@ -263,7 +263,7 @@ class ChartEngine {
   _zoom_at_cursor(delta, mouseX) {
     const win      = this.compute_window();
     const prevBars = this.visible_bars;
-    const factor   = delta > 0 ? 1.15 : 1 / 1.15;
+    const factor   = delta > 0 ? 2.0 : 1 / 2.0;
     this.visible_bars = factor < 1
       ? Math.floor(this.visible_bars * factor)
       : Math.ceil(this.visible_bars * factor);
