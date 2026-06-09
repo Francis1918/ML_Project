@@ -4,3 +4,4 @@
 
 # requires 'perl', '5.010';
 requires 'Mojolicious';
+#modificacion de las dependencias
