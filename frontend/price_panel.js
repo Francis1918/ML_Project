@@ -145,24 +145,28 @@ class PricePanel {
       if (!mt) continue;
       const totalMin = +mt[4] * 60 + +mt[5];
 
-      const prevC      = i > 0 ? allCandles[i - 1] : null;
-      const isNewMonth = !prevC || prevC.time.slice(0, 7) !== c.time.slice(0, 7);
-      const isNewDay   = !prevC || prevC.time.slice(0, 10) !== c.time.slice(0, 10);
-      const isInterval = (totalMin % intervalMin) === 0;
+      const prevC       = i > 0 ? allCandles[i - 1] : null;
+      const isNewMonth  = !prevC || prevC.time.slice(0, 7) !== c.time.slice(0, 7);
+      const isNewDay    = !prevC || prevC.time.slice(0, 10) !== c.time.slice(0, 10);
+      const isInterval  = (totalMin % intervalMin) === 0;
+      // Primer candle visible: anclar la etiqueta de día (estilo TradingView)
+      const isFirstVis  = i === firstIndex;
 
-      if (!isNewDay && !isInterval) continue;
+      if (!isNewDay && !isInterval && !isFirstVis) continue;
 
       const x = s.index_to_center_x(i);
       if (x < 0 || x > s.plot_width) continue;
 
-      // Línea vertical de grilla
-      ctx.strokeStyle = "#1c212e";
-      ctx.lineWidth   = 1;
-      ctx.setLineDash([]);
-      ctx.beginPath();
-      ctx.moveTo(Math.round(x) + 0.5, 0);
-      ctx.lineTo(Math.round(x) + 0.5, y - 2);
-      ctx.stroke();
+      // Línea vertical de grilla (solo para cambios de día e intervalos regulares)
+      if (isNewDay || isInterval) {
+        ctx.strokeStyle = "#1c212e";
+        ctx.lineWidth   = 1;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(Math.round(x) + 0.5, 0);
+        ctx.lineTo(Math.round(x) + 0.5, y - 2);
+        ctx.stroke();
+      }
 
       // Etiqueta (solo si hay espacio suficiente respecto a la anterior)
       if (x - lastLabelX < minGap) continue;
@@ -172,8 +176,8 @@ class PricePanel {
         // Inicio de mes: "Abr 1", "May 15" — más brillante
         ctx.fillStyle = "#d1d4dc";
         ctx.fillText(MESES[+mt[2] - 1] + " " + +mt[3], x, y);
-      } else if (isNewDay) {
-        // Nuevo día (mismo mes): "lun 15" — tono medio
+      } else if (isNewDay || isFirstVis) {
+        // Nuevo día o etiqueta anclada del primer candle visible — tono medio
         ctx.fillStyle = "#a8aab4";
         ctx.fillText(diaSemana(c.time) + " " + +mt[3], x, y);
       } else {
