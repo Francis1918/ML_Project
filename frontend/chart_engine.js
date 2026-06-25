@@ -60,7 +60,7 @@ class ChartEngine {
     const virtualLast  = n - 1 - this.offset;
     const virtualFirst = virtualLast - count + 1;
     const first = Math.max(0, Math.min(n - 1, Math.floor(virtualFirst)));
-    const last  = Math.max(0, Math.min(n - 1, Math.floor(virtualLast)));
+    const last  = Math.max(0, Math.min(n - 1, Math.ceil(virtualLast)));
     return { first, last, virtualFirst, count };
   }
   _clamp_offset() {
