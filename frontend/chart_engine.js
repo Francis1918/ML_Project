@@ -244,7 +244,21 @@ class ChartEngine {
       ? Math.floor(this.visible_bars * factor)
       : Math.ceil(this.visible_bars * factor);
     this._clamp_bars();
-    if (this.mode === "auto") {
+    if (this.offset < 0 && this.visible_bars !== prevBars) {
+      // At/past the end of data: anchor zoom to the last real candle,
+      // same logic as _zoom_at_cursor but without requiring Ctrl.
+      const n       = this.market.candles.length;
+      const plotW   = this.priceScale.plot_width ||
+                      (this.els.priceCanvas.getBoundingClientRect().width - PRICE_AXIS_W);
+      const count   = Math.min(this.visible_bars, n);
+      const newBarW = plotW / count;
+      const anchorIdx = n - 1;
+      const anchorX   = this.priceScale.index_to_center_x(anchorIdx);
+      const newFirst  = anchorIdx - anchorX / newBarW;
+      this.offset = Math.round((n - 1) - count + 1 - newFirst);
+      const maxOff = Math.max(0, n - 2);
+      if (this.offset > maxOff) this.offset = maxOff;
+    } else if (this.mode === "auto") {
       this.offset = Math.max(0, this.offset);
     } else if (this.visible_bars !== prevBars) {
       // Manual: anclar al cursor solo si el zoom realmente cambio.
