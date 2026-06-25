@@ -59,8 +59,8 @@ class ChartEngine {
     const count        = Math.min(this.visible_bars, n);
     const virtualLast  = n - 1 - this.offset;
     const virtualFirst = virtualLast - count + 1;
-    const first = Math.max(0, Math.min(n - 1, virtualFirst));
-    const last  = Math.max(0, Math.min(n - 1, virtualLast));
+    const first = Math.max(0, Math.min(n - 1, Math.floor(virtualFirst)));
+    const last  = Math.max(0, Math.min(n - 1, Math.floor(virtualLast)));
     return { first, last, virtualFirst, count };
   }
   _clamp_offset() {
@@ -187,6 +187,7 @@ class ChartEngine {
     }
   }
   _on_canvas_move(e, cv) {
+    if (e.ctrlKey) return;
     const rect = cv.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -244,32 +245,26 @@ class ChartEngine {
       ? Math.floor(this.visible_bars * factor)
       : Math.ceil(this.visible_bars * factor);
     this._clamp_bars();
-    if (this.offset < 0 && this.visible_bars !== prevBars) {
-      // At/past the end of data: anchor zoom to the last real candle,
-      // same logic as _zoom_at_cursor but without requiring Ctrl.
-      const n       = this.market.candles.length;
-      const plotW   = this.priceScale.plot_width ||
-                      (this.els.priceCanvas.getBoundingClientRect().width - PRICE_AXIS_W);
-      const count   = Math.min(this.visible_bars, n);
-      const newBarW = plotW / count;
-      const anchorIdx = n - 1;
-      const anchorX   = this.priceScale.index_to_center_x(anchorIdx);
-      const newFirst  = anchorIdx - anchorX / newBarW;
-      this.offset = Math.round((n - 1) - count + 1 - newFirst);
-      const maxOff = Math.max(0, n - 2);
-      if (this.offset > maxOff) this.offset = maxOff;
-    } else if (this.mode === "auto") {
-      this.offset = Math.max(0, this.offset);
-    } else if (this.visible_bars !== prevBars) {
-      // Manual: anclar al cursor solo si el zoom realmente cambio.
-      const idxUnderCursor = win.virtualFirst + mouseX / this._lastBarW;
+    if (this.visible_bars !== prevBars) {
+      const n      = this.market.candles.length;
       const plotW  = this.priceScale.plot_width ||
                      (this.els.priceCanvas.getBoundingClientRect().width - PRICE_AXIS_W);
-      const n      = this.market.candles.length;
       const count  = Math.min(this.visible_bars, n);
-      const newBarW  = plotW / count;
-      const newFirst = idxUnderCursor - mouseX / newBarW;
-      this.offset = Math.round((n - 1) - count + 1 - newFirst);
+      const newBarW = plotW / count;
+      // Pivot: cursor position. If cursor is over empty future space (past last
+      // real candle), fall back to the last real candle so the chart doesn't
+      // zoom into void.
+      const curBarW = plotW / Math.min(prevBars, n);
+      let anchorIdx = win.virtualFirst + mouseX / curBarW;
+      let anchorX   = mouseX;
+      if (anchorIdx >= n) {
+        anchorIdx = n - 1;
+        anchorX   = this.priceScale.index_to_center_x(n - 1);
+      }
+      const newFirst = anchorIdx - anchorX / newBarW;
+      this.offset = (n - 1) - count + 1 - newFirst;
+      const maxOff = Math.max(0, n - 2);
+      if (this.offset > maxOff) this.offset = maxOff;
     }
     this._clamp_offset();
     this.request_render();
@@ -283,16 +278,21 @@ class ChartEngine {
       : Math.ceil(this.visible_bars * factor);
     this._clamp_bars();
     if (this.visible_bars !== prevBars) {
-      const idxUnderCursor = win.virtualFirst + mouseX / this._lastBarW;
+      const n      = this.market.candles.length;
       const plotW  = this.priceScale.plot_width ||
                      (this.els.priceCanvas.getBoundingClientRect().width - PRICE_AXIS_W);
-      const n      = this.market.candles.length;
       const count  = Math.min(this.visible_bars, n);
-      const newBarW  = plotW / count;
-      const newFirst = idxUnderCursor - mouseX / newBarW;
-      this.offset = Math.round((n - 1) - count + 1 - newFirst);
-      // Solo evitar que todo el grafico quede invisible; no forzar vista
-      // estandar para que el pivote no se desplace.
+      const newBarW = plotW / count;
+      const curBarW = plotW / Math.min(prevBars, n);
+      let idxUnderCursor = win.virtualFirst + mouseX / curBarW;
+      let pivotX = mouseX;
+      // Si el cursor está en espacio vacío futuro, usar la última vela real.
+      if (idxUnderCursor >= n) {
+        idxUnderCursor = n - 1;
+        pivotX = this.priceScale.index_to_center_x(n - 1);
+      }
+      const newFirst = idxUnderCursor - pivotX / newBarW;
+      this.offset = (n - 1) - count + 1 - newFirst;
       const maxOff = Math.max(0, n - 2);
       if (this.offset > maxOff) this.offset = maxOff;
     }
