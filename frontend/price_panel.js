@@ -128,7 +128,7 @@ class PricePanel {
 
     // Intervalo de etiqueta: ideal = (velas_visibles × min_por_vela) / 33
     // → buscar el siguiente intervalo estandar en la lista.
-    const tfMin = { '1m': 1, '5m': 5, '15m': 15 }[timeframe] || 1;
+    const tfMin = { '1m':1, '5m':5, '15m':15, '1h':60, '2h':120, '4h':240, 'D':1440, 'W':10080 }[timeframe] || 1;
     const STD   = [1, 5, 15, 30, 60, 120, 240, 360, 720, 1440];
     const ideal = (visibleCount * tfMin) / 33;
     const intervalMin = STD.find(iv => iv >= ideal) || 1440;

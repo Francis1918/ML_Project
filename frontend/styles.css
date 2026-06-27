@@ -96,3 +96,23 @@ body {
 .mode-btn:last-child  { border-radius: 0 4px 4px 0; border-left: none; }
 .mode-btn:hover       { background: #363a45; color: #d1d4dc; }
 .mode-btn.active      { background: #2962ff !important; border-color: #2962ff; color: #fff !important; }
+
+/* ---------- Replay ---------- */
+#replay-group { display: flex; align-items: center; gap: 4px; }
+#replay-controls { display: flex; align-items: center; gap: 3px; }
+#replay-controls.hidden { display: none; }
+#replay-info {
+  font-size: 11px;
+  color: #a8aab4;
+  min-width: 170px;
+  text-align: center;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+#btn-replay-on { min-width: 80px; }
+#btn-rexit {
+  background: #3a2020 !important;
+  border-color: #6e3030 !important;
+  color: #ef5350 !important;
+}
+#btn-rexit:hover { background: #5a2828 !important; }

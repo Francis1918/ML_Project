@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Trading Chart</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=11" />
 </head>
 <body>
   <div id="app">
@@ -15,7 +15,27 @@
         <button class="tf-btn active" data-tf="1m">1m</button>
         <button class="tf-btn" data-tf="5m">5m</button>
         <button class="tf-btn" data-tf="15m">15m</button>
+        <button class="tf-btn" data-tf="1h">1h</button>
+        <button class="tf-btn" data-tf="2h">2h</button>
+        <button class="tf-btn" data-tf="4h">4h</button>
+        <button class="tf-btn" data-tf="D">D</button>
+        <button class="tf-btn" data-tf="W">W</button>
       </div>
+
+      <!-- Controles de Replay -->
+      <div id="replay-group">
+        <button id="btn-replay-on" title="Activar modo Replay">&#x21A9; Replay</button>
+        <div id="replay-controls" class="hidden">
+          <button id="btn-rbk10" title="Retroceder 10 velas">&#xAB;</button>
+          <button id="btn-rbk1"  title="Retroceder 1 vela">&#x2039;</button>
+          <button id="btn-rplay" title="Play / Pausa">&#x25B6;</button>
+          <button id="btn-rfwd1"  title="Avanzar 1 vela">&#x203A;</button>
+          <button id="btn-rfwd10" title="Avanzar 10 velas">&#xBB;</button>
+          <span id="replay-info"></span>
+          <button id="btn-rexit" title="Salir del Replay">&#x2715;</button>
+        </div>
+      </div>
+
       <span class="spacer"></span>
       <div class="mode-group">
         <button id="btn-auto"   class="mode-btn active">Auto</button>
@@ -44,11 +64,10 @@
 
   </div>
 
-  <!-- Modulos del frontend (se completan en los siguientes pasos) -->
-  <script src="scales.js?v=9"></script>
-  <script src="price_panel.js?v=9"></script>
-  <script src="atr_panel.js?v=9"></script>
-  <script src="chart_engine.js?v=9"></script>
-  <script src="app.js?v=9"></script>
+  <script src="scales.js?v=11"></script>
+  <script src="price_panel.js?v=11"></script>
+  <script src="atr_panel.js?v=11"></script>
+  <script src="chart_engine.js?v=11"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

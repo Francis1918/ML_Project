@@ -1,5 +1,47 @@
 "use strict";
 
+// Colores del badge de MarketRegime
+const REGIME_COLORS = {
+  'UNKNOWN':          '#546E7A',
+  'ZONA_INTERNA':     '#607D8B',
+  'LIQUIDEZ_INTERNA': '#E65100',
+  'LIQUIDEZ_EXTERNA': '#1565C0',
+  'ZM_MANIPULATION':  '#6A1B9A',
+  'TRANSITION':       '#00838F',
+  'TR_BULLISH':       '#1B5E20',
+  'TR_BEARISH':       '#B71C1C',
+};
+
+// Mapa de color_role → color hex (coincide con los roles definidos en Overlays/*.pm)
+const OV_COLORS = {
+  bsl:              '#EF5350',
+  ssl:              '#26A69A',
+  eqh:              '#FF9800',
+  eql:              '#00BCD4',
+  sweep_up:         '#EF5350',
+  sweep_down:       '#26A69A',
+  grab:             '#FF9800',
+  run:              '#2196F3',
+  pivot_hh:         '#26A69A',
+  pivot_hl:         '#4CAF50',
+  pivot_lh:         '#FF5722',
+  pivot_ll:         '#EF5350',
+  bos_bullish:      '#26A69A',
+  bos_bearish:      '#EF5350',
+  choch_bullish:    '#00BCD4',
+  choch_bearish:    '#FF9800',
+  fvg_bullish:      '#26A69A',
+  fvg_bearish:      '#EF5350',
+  fvg_high_reaction:'#FFD700',
+  fib_level:        '#9E9E9E',
+};
+
+function _ov_dash(style) {
+  if (style === 'dashed') return [5, 3];
+  if (style === 'dotted') return [2, 2];
+  return [];
+}
+
 // Dia de la semana (lun..dom) de una fecha ISO, sin influencia de la zona horaria.
 function diaSemana(iso) {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -37,7 +79,9 @@ class ChartEngine {
     this.atrPanel   = new ATRPanel(els.atrCanvas, this.atrScale);
     this._lastBarW = 8;
     this.mode = "auto";
+    this.overlays = null;
   }
+  set_overlays(ov) { this.overlays = ov; }
   set_mode(mode) {
     this.mode = mode;
     if (mode === "auto") {
@@ -106,6 +150,7 @@ class ChartEngine {
     this.priceScale.set_x_window(win.virtualFirst, barW);
     this.priceScale.set_y_range(yMin, yMax);
     this.pricePanel.render(candles, win.first);
+    this._draw_overlays(this.els.priceCanvas.getContext("2d"), win);
     const lastC = this.market.candles[this.market.candles.length - 1];
     if (lastC) this.pricePanel.draw_last_price(lastC.close, lastC.open);
     const sizeA = this._fit_canvas(this.els.atrCanvas);
@@ -392,8 +437,10 @@ class ChartEngine {
   _update_statusbar() {
     const win = this.compute_window();
     if (this.els.statusWindow) {
+      const mr  = this.overlays?.market_regime;
+      const reg = mr ? ` | ${mr.state} (${mr.confidence_score})` : '';
       this.els.statusWindow.textContent =
-        `TF ${this.market.timeframe} | ${this.mode} | barras ${win.count} | offset ${this.offset}`;
+        `TF ${this.market.timeframe} | ${this.mode} | barras ${win.count} | offset ${this.offset}${reg}`;
     }
     if (this.els.statusHover) {
       if (this._hoverIndex !== null &&
@@ -412,6 +459,147 @@ class ChartEngine {
       }
     }
   }
+  // ============================================================
+  //  Renderizado de overlay shapes (liquidity + SMC)
+  // ============================================================
+
+  _draw_overlays(ctx, win) {
+    if (!this.overlays) return;
+    const s = this.priceScale;
+    const lshapes = this.overlays.liquidity?.overlay_shapes ?? [];
+    const sshapes = this.overlays.smc?.overlay_shapes       ?? [];
+
+    // Dibujar en orden: rectangulos → lineas → etiquetas/marcadores
+    const rects  = [];
+    const lines  = [];
+    const labels = [];
+
+    for (const sh of [...lshapes, ...sshapes]) {
+      if (!sh.visible_by_default) continue;
+      if ((sh.x2_index ?? sh.x1_index) < win.first) continue;
+      if (sh.x1_index > win.last) continue;
+      if (sh.kind === 'rectangle')             rects.push(sh);
+      else if (sh.kind === 'line' || sh.kind === 'fib_line') lines.push(sh);
+      else                                     labels.push(sh);
+    }
+
+    for (const sh of rects)  this._ov_rect(ctx, s, sh, win);
+    for (const sh of lines)  this._ov_line(ctx, s, sh, win);
+    for (const sh of labels) this._ov_label(ctx, s, sh, win);
+
+    // Badge de regimen (esquina superior derecha del panel de precio)
+    this._draw_regime_badge(ctx);
+  }
+
+  _draw_regime_badge(ctx) {
+    const mr = this.overlays?.market_regime;
+    if (!mr || !mr.state) return;
+    const s     = this.priceScale;
+    const color = REGIME_COLORS[mr.state] ?? '#546E7A';
+    const label = mr.state;
+    const score = mr.confidence_score ? ` ${mr.confidence_score}` : '';
+
+    ctx.save();
+    ctx.font = 'bold 11px Arial';
+    const tw = ctx.measureText(label).width;
+    const pw = tw + 16;
+    const ph = 18;
+    const px = s.plot_width - pw - 6;
+    const py = 6;
+
+    // Fondo del badge
+    ctx.globalAlpha = 0.90;
+    ctx.fillStyle   = color;
+    ctx.fillRect(px, py, pw, ph);
+
+    // Texto del estado
+    ctx.globalAlpha  = 1.0;
+    ctx.fillStyle    = '#ffffff';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign    = 'center';
+    ctx.fillText(label, px + pw / 2, py + ph / 2);
+
+    // Score debajo del badge
+    if (score) {
+      ctx.globalAlpha = 0.80;
+      ctx.font        = '9px Arial';
+      ctx.fillStyle   = color;
+      ctx.fillText(score, px + pw / 2, py + ph + 7);
+    }
+
+    ctx.restore();
+  }
+
+  _ov_rect(ctx, s, sh, win) {
+    const color = OV_COLORS[sh.color_role] ?? '#888888';
+    const x1 = Math.max(sh.x1_index, win.first - 1);
+    const x2 = Math.min(sh.x2_index, win.last + 1);
+    const px1 = s.index_to_x(x1);
+    const px2 = s.index_to_x(x2) + s.bar_width;
+    const pyTop = s.value_to_y(sh.y2_price);  // precio mayor → y menor (arriba)
+    const pyBot = s.value_to_y(sh.y1_price);  // precio menor → y mayor (abajo)
+    if (pyTop > s.height || pyBot < 0) return;
+    ctx.save();
+    ctx.globalAlpha = sh.opacity ?? 0.3;
+    ctx.fillStyle   = color;
+    ctx.fillRect(px1, pyTop, px2 - px1, pyBot - pyTop);
+    if (sh.text) {
+      ctx.globalAlpha = Math.min(1.0, (sh.opacity ?? 0.3) + 0.45);
+      ctx.font = '9px Arial';
+      ctx.textBaseline = 'top';
+      ctx.textAlign    = 'left';
+      ctx.fillText(sh.text, px1 + 2, pyTop + 2);
+    }
+    ctx.restore();
+  }
+
+  _ov_line(ctx, s, sh, win) {
+    const color = OV_COLORS[sh.color_role] ?? '#888888';
+    const x1 = Math.max(sh.x1_index, win.first - 1);
+    const x2 = Math.min(sh.x2_index ?? sh.x1_index, win.last + 1);
+    const px1 = s.index_to_center_x(x1);
+    const px2 = s.index_to_center_x(x2);
+    const py  = s.value_to_y(sh.y1_price);
+    if (py < 0 || py > s.height) return;
+    ctx.save();
+    ctx.globalAlpha = sh.opacity ?? 0.8;
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = sh.kind === 'fib_line' ? 0.8 : 1;
+    ctx.setLineDash(_ov_dash(sh.line_style));
+    ctx.beginPath();
+    ctx.moveTo(px1, Math.round(py) + 0.5);
+    ctx.lineTo(px2, Math.round(py) + 0.5);
+    ctx.stroke();
+    if (sh.kind === 'fib_line' && sh.text) {
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle   = color;
+      ctx.font = '9px Arial';
+      ctx.textBaseline = 'bottom';
+      ctx.textAlign    = 'right';
+      ctx.fillText(sh.text, px2 - 2, Math.round(py) - 1);
+    }
+    ctx.restore();
+  }
+
+  _ov_label(ctx, s, sh, win) {
+    if (sh.x1_index < win.first || sh.x1_index > win.last) return;
+    const color = OV_COLORS[sh.color_role] ?? '#888888';
+    const px = s.index_to_center_x(sh.x1_index);
+    const py = s.value_to_y(sh.y1_price);
+    if (py < 0 || py > s.height) return;
+    const text = sh.text ?? '';
+    if (!text) return;
+    ctx.save();
+    ctx.globalAlpha  = sh.opacity ?? 0.9;
+    ctx.fillStyle    = color;
+    ctx.font         = '10px Arial';
+    ctx.textBaseline = 'bottom';
+    ctx.textAlign    = 'center';
+    ctx.fillText(text, px, py - 3);
+    ctx.restore();
+  }
+
   reset_view() {
     this.visible_bars = 120;
     this.offset = 0;
