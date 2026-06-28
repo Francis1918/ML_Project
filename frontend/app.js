@@ -35,6 +35,54 @@ const Replay = {
 // Replay/overlays siguen ventaneados; las velas normales se piden completas.
 const WINDOW_LIMIT = 500;
 
+
+// Estado de la checklist de capas. Vive en el frontend: no cambia el cálculo
+// del backend, solo filtra qué shapes dibuja ChartEngine.
+function readOverlayVisibilityFromUI() {
+  const state = {};
+  document.querySelectorAll('[data-layer-toggle]').forEach(input => {
+    state[input.dataset.layerToggle] = input.checked;
+  });
+  return state;
+}
+
+function _syncOverlayControlStates() {
+  const controls = document.getElementById('overlay-controls');
+  if (!controls) return;
+
+  const smcAll = controls.querySelector('[data-layer-toggle="smc_all"]')?.checked ?? true;
+  controls.querySelectorAll('[data-layer-parent="smc_all"]').forEach(input => {
+    input.disabled = !smcAll;
+    input.closest('label')?.classList.toggle('disabled', !smcAll);
+  });
+
+  const liqAll = controls.querySelector('[data-layer-toggle="liq_all"]')?.checked ?? true;
+  controls.querySelectorAll('[data-layer-parent="liq_all"]').forEach(input => {
+    input.disabled = !liqAll;
+    input.closest('label')?.classList.toggle('disabled', !liqAll);
+  });
+}
+
+function applyOverlayVisibilityFromUI() {
+  if (!App.engine) return;
+  App.engine.set_overlay_visibility(readOverlayVisibilityFromUI());
+}
+
+function initOverlayControls() {
+  const controls = document.getElementById('overlay-controls');
+  if (!controls) return;
+
+  controls.querySelectorAll('[data-layer-toggle]').forEach(input => {
+    input.addEventListener('change', () => {
+      _syncOverlayControlStates();
+      applyOverlayVisibilityFromUI();
+    });
+  });
+
+  _syncOverlayControlStates();
+  applyOverlayVisibilityFromUI();
+}
+
 // ============================================================
 //  API helpers
 // ============================================================
@@ -288,6 +336,7 @@ function init() {
     statusWindow:   App.els.statusWindow,
   });
   App.engine.set_overlays(App.overlays);
+  initOverlayControls();
   App.engine.render();
   App.engine.bind_events();
 

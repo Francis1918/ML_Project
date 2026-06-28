@@ -42,6 +42,32 @@ function _ov_dash(style) {
   return [];
 }
 
+
+// Estado visual por capa. Solo afecta el render: los indicadores siguen llegando
+// completos desde el backend y no se recalcula nada por activar/desactivar capas.
+const DEFAULT_OVERLAY_VISIBILITY = Object.freeze({
+  smc_all:       true,
+  smc_hh:        true,
+  smc_hl:        true,
+  smc_lh:        true,
+  smc_ll:        true,
+  smc_bos:       true,
+  smc_choch:     true,
+  smc_fvg:       true,
+  smc_fib:       true,
+
+  liq_all:       true,
+  liq_bsl:       true,
+  liq_ssl:       true,
+  liq_eqh:       true,
+  liq_eql:       true,
+  liq_grab:      true,
+  liq_sweep:     true,
+  liq_run:       true,
+
+  market_regime: true,
+});
+
 // Dia de la semana (lun..dom) de una fecha ISO, sin influencia de la zona horaria.
 function diaSemana(iso) {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -80,9 +106,15 @@ class ChartEngine {
     this._lastBarW = 8;
     this.mode = "auto";
     this.overlays = null;
+    this.overlay_visibility = { ...DEFAULT_OVERLAY_VISIBILITY };
   }
 
   set_overlays(ov) { this.overlays = ov; }
+
+  set_overlay_visibility(visibility = {}) {
+    this.overlay_visibility = { ...DEFAULT_OVERLAY_VISIBILITY, ...visibility };
+    this.request_render();
+  }
 
   set_mode(mode) {
     this.mode = mode;
@@ -647,6 +679,48 @@ class ChartEngine {
   }
 
   // ============================================================
+  //  Filtro de capas visuales.
+  //  La categoria se decide por source_type y color_role, que ya vienen
+  //  generados por Market::Overlays::* en el backend.
+  // ============================================================
+
+  _overlay_layer_on(key) {
+    return this.overlay_visibility?.[key] !== false;
+  }
+
+  _is_overlay_shape_visible(sh) {
+    const src  = (sh.source_type || '').toLowerCase();
+    const role = (sh.color_role  || '').toLowerCase();
+
+    const isSmcShape = src === 'smc' || src === 'fvg' || src === 'fib' ||
+                       role.startsWith('pivot_') || role.startsWith('bos_') ||
+                       role.startsWith('choch_') || role.startsWith('fvg_') ||
+                       role === 'fib_level';
+    if (isSmcShape && !this._overlay_layer_on('smc_all')) return false;
+
+    if (role === 'pivot_hh') return this._overlay_layer_on('smc_hh');
+    if (role === 'pivot_hl') return this._overlay_layer_on('smc_hl');
+    if (role === 'pivot_lh') return this._overlay_layer_on('smc_lh');
+    if (role === 'pivot_ll') return this._overlay_layer_on('smc_ll');
+    if (role.startsWith('bos_'))   return this._overlay_layer_on('smc_bos');
+    if (role.startsWith('choch_')) return this._overlay_layer_on('smc_choch');
+    if (src === 'fvg' || role.startsWith('fvg_')) return this._overlay_layer_on('smc_fvg');
+    if (src === 'fib' || role === 'fib_level')    return this._overlay_layer_on('smc_fib');
+
+    if (src === 'liquidity' && !this._overlay_layer_on('liq_all')) return false;
+
+    if (role === 'bsl') return this._overlay_layer_on('liq_bsl');
+    if (role === 'ssl') return this._overlay_layer_on('liq_ssl');
+    if (role === 'eqh') return this._overlay_layer_on('liq_eqh');
+    if (role === 'eql') return this._overlay_layer_on('liq_eql');
+    if (role === 'grab') return this._overlay_layer_on('liq_grab');
+    if (role === 'sweep_up' || role === 'sweep_down') return this._overlay_layer_on('liq_sweep');
+    if (role === 'run') return this._overlay_layer_on('liq_run');
+
+    return true;
+  }
+
+  // ============================================================
   //  Overlays (shapes de Liquidity + SMC)
   // ============================================================
 
@@ -662,6 +736,7 @@ class ChartEngine {
 
     for (const sh of [...lshapes, ...sshapes]) {
       if (!sh.visible_by_default) continue;
+      if (!this._is_overlay_shape_visible(sh)) continue;
       if ((sh.x2_index ?? sh.x1_index) < win.first) continue;
       if (sh.x1_index > win.last) continue;
       if      (sh.kind === 'rectangle')                rects.push(sh);
@@ -677,6 +752,7 @@ class ChartEngine {
   }
 
   _draw_regime_badge(ctx) {
+    if (!this._overlay_layer_on('market_regime')) return;
     const mr = this.overlays?.market_regime;
     if (!mr || !mr.state) return;
     const s     = this.priceScale;

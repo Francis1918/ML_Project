@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Trading Chart</title>
-  <link rel="stylesheet" href="styles.css?v=15" />
+  <link rel="stylesheet" href="styles.css?v=16" />
 </head>
 <body>
   <div id="app">
@@ -20,6 +20,69 @@
         <button class="tf-btn" data-tf="4h">4h</button>
         <button class="tf-btn" data-tf="D">D</button>
         <button class="tf-btn" data-tf="W">W</button>
+      </div>
+
+      <!-- Checklist de capas visuales. Solo filtra el render; no cambia calculos. -->
+      <div id="overlay-controls" class="overlay-controls" aria-label="Capas visuales">
+        <span class="overlay-title">Capas</span>
+
+        <label class="layer-check layer-master">
+          <input type="checkbox" data-layer-toggle="smc_all" checked /> SMC
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="smc_hh" data-layer-parent="smc_all" checked /> HH
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="smc_hl" data-layer-parent="smc_all" checked /> HL
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="smc_lh" data-layer-parent="smc_all" checked /> LH
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="smc_ll" data-layer-parent="smc_all" checked /> LL
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="smc_choch" data-layer-parent="smc_all" checked /> CHoCH
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="smc_bos" data-layer-parent="smc_all" checked /> BOS
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="smc_fvg" data-layer-parent="smc_all" checked /> FVG
+        </label>
+
+        <span class="overlay-sep"></span>
+
+        <label class="layer-check layer-master">
+          <input type="checkbox" data-layer-toggle="liq_all" checked /> Liquidez
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="liq_bsl" data-layer-parent="liq_all" checked /> BSL
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="liq_ssl" data-layer-parent="liq_all" checked /> SSL
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="liq_eqh" data-layer-parent="liq_all" checked /> EQH
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="liq_eql" data-layer-parent="liq_all" checked /> EQL
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="liq_grab" data-layer-parent="liq_all" checked /> Grab
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="liq_sweep" data-layer-parent="liq_all" checked /> Sweep
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="liq_run" data-layer-parent="liq_all" checked /> Run
+        </label>
+
+        <span class="overlay-sep"></span>
+
+        <label class="layer-check">
+          <input type="checkbox" data-layer-toggle="market_regime" checked /> Regime
+        </label>
       </div>
 
       <!-- Controles de Replay -->
@@ -67,10 +130,10 @@
 
   </div>
 
-  <script src="scales.js?v=15"></script>
-  <script src="price_panel.js?v=15"></script>
-  <script src="atr_panel.js?v=15"></script>
-  <script src="chart_engine.js?v=15"></script>
-  <script src="app.js?v=15"></script>
+  <script src="scales.js?v=16"></script>
+  <script src="price_panel.js?v=16"></script>
+  <script src="atr_panel.js?v=16"></script>
+  <script src="chart_engine.js?v=16"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>
