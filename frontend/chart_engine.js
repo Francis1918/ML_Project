@@ -52,9 +52,8 @@ function diaSemana(iso) {
 
 const PRICE_AXIS_W = 60;
 const TIME_AXIS_H  = 20;
-const MIN_BARS     = 2;
-// MAX_BARS: limitado dinamicamente en _clamp_bars() a 2*pixels de ancho
-const MAX_BARS_ABS = 600;
+const MIN_BARS = 2;
+const MAX_BARS = 8000;
 
 class ChartEngine {
   constructor(market, els) {
@@ -126,11 +125,7 @@ class ChartEngine {
 
   _clamp_bars() {
     const n = this.market.candles.length;
-    // Limite dinamico: no mas de 2 velas por pixel del area de dibujo
-    const plotW = this.priceScale.plot_width ||
-                  Math.max(200, (this.els.priceCanvas.getBoundingClientRect().width - PRICE_AXIS_W));
-    const dynMax = Math.min(MAX_BARS_ABS, Math.max(MIN_BARS, Math.floor(plotW * 2)));
-    const top = Math.min(dynMax, n);
+    const top = Math.min(MAX_BARS, n);
     if (this.visible_bars < MIN_BARS) this.visible_bars = MIN_BARS;
     if (this.visible_bars > top) this.visible_bars = top;
   }
@@ -166,33 +161,37 @@ class ChartEngine {
     const barW  = plotW / win.count;
     this._lastBarW = barW;
 
-    // Obtener slice de velas (con LOD si barW < 1)
-    const { candles: renderCandles, firstIndex: renderFirst } =
-      this._get_render_candles(win, barW);
+    // Render normal, sin LOD: conserva la semántica original de index_to_x()
+    // usada por PricePanel, ATRPanel, overlays y eje temporal.
+    const candles = this.market.candles.slice(win.first, win.last + 1);
 
     let yMin, yMax;
     if (this.price_auto) {
-      const yr = this.pricePanel.get_y_range(renderCandles);
+      const yr = this.pricePanel.get_y_range(candles);
       yMin = yr.min; yMax = yr.max;
-    } else { yMin = this.price_min; yMax = this.price_max; }
+    } else {
+      yMin = this.price_min;
+      yMax = this.price_max;
+    }
 
     this.priceScale.set_size(sizeP.w, sizeP.h, plotW);
     this.priceScale.set_x_window(win.virtualFirst, barW);
     this.priceScale.set_y_range(yMin, yMax);
 
-    this.pricePanel.render(renderCandles, renderFirst);
+    this.pricePanel.render(candles, win.first);
     this._draw_overlays(this.els.priceCanvas.getContext("2d"), win);
 
     const lastC = this.market.candles[this.market.candles.length - 1];
     if (lastC) this.pricePanel.draw_last_price(lastC.close, lastC.open);
 
     // Panel ATR
-    const sizeA  = this._fit_canvas(this.els.atrCanvas);
-    const plotH  = sizeA.h - TIME_AXIS_H;
+    const sizeA    = this._fit_canvas(this.els.atrCanvas);
+    const plotH    = sizeA.h - TIME_AXIS_H;
     const atrSlice = this.market.atr.slice(win.first, win.last + 1);
     const yrA = this.atr_auto
       ? this.atrPanel.get_y_range(atrSlice)
       : { min: this.atr_min, max: this.atr_max };
+
     this.atrScale.set_size(sizeA.w, plotH, plotW);
     this.atrScale.set_x_window(win.virtualFirst, barW);
     this.atrScale.set_y_range(yrA.min, yrA.max);
@@ -207,18 +206,27 @@ class ChartEngine {
       this.market.timeframe
     );
 
-    // Actualizar statusbar de ventana (no el hover, ese es del crosshair)
     this._update_statusbar();
 
-    // Redibujar crosshair sobre el nuevo frame si el mouse sigue dentro.
-    // Recalcular _hoverIndex porque la escala puede haber cambiado (zoom/scroll).
-    if (this._mouse) {
-      this._hoverIndex = this.priceScale.x_to_index(this._mouse.x);
-      this._draw_crosshair_only();
+    // Si existen canvas superpuestos, el crosshair vive ahí.
+    // Si el resto del repositorio todavía no los pasa en `els`, se usa el
+    // comportamiento original y se dibuja sobre los canvas base.
+    if (this._has_crosshair_layers()) {
+      if (this._mouse) {
+        this._hoverIndex = this.priceScale.x_to_index(this._mouse.x);
+        this._draw_crosshair_only();
+      } else {
+        this._clear_crosshair();
+      }
+    } else {
+      this._draw_crosshair_all();
+      this._update_hover_status();
     }
 
     const dt = performance.now() - t0;
-    if (dt > 20) console.debug(`[render] ${dt.toFixed(1)}ms | bars=${win.count} barW=${barW.toFixed(2)}`);
+    if (dt > 20) {
+      console.debug(`[render] ${dt.toFixed(1)}ms | bars=${win.count} barW=${barW.toFixed(2)}`);
+    }
   }
 
   // ============================================================
@@ -227,44 +235,23 @@ class ChartEngine {
   // ============================================================
 
   _get_render_candles(win, barW) {
-    const raw = this.market.candles;
-    if (barW >= 1) {
-      return { candles: raw.slice(win.first, win.last + 1), firstIndex: win.first };
-    }
-
-    // Downsampling: un "bucket" por pixel visible
-    const plotW    = this.priceScale.plot_width;
-    const pixels   = Math.max(1, Math.round(plotW));
-    const total    = win.last - win.first + 1;
-    const grpSize  = Math.ceil(total / pixels);
-
-    const merged = [];
-    for (let i = win.first; i <= win.last; i += grpSize) {
-      const end = Math.min(i + grpSize - 1, win.last);
-      let high = -Infinity, low = Infinity, vol = 0;
-      for (let j = i; j <= end; j++) {
-        const c = raw[j];
-        if (c.high > high) high = c.high;
-        if (c.low  < low)  low  = c.low;
-        vol += c.volume ?? 0;
-      }
-      merged.push({
-        time:   raw[i].time,
-        open:   raw[i].open,
-        close:  raw[end].close,
-        high, low,
-        volume: vol,
-      });
-    }
-    // El firstIndex del array fusionado sigue siendo win.first para que la
-    // escala X coloque el primer bucket en la posicion correcta.
-    return { candles: merged, firstIndex: win.first };
+    // Conservado por compatibilidad si otro código lo llama, pero no usado
+    // por render(). El downsampling anterior rompía la correspondencia
+    // índice ↔ pixel porque PricePanel dibuja cada candle como firstIndex + k.
+    return {
+      candles: this.market.candles.slice(win.first, win.last + 1),
+      firstIndex: win.first,
+    };
   }
 
   // ============================================================
   //  Crosshair en canvas superpuesto.
   //  Solo limpia/redibuja ese canvas; el canvas base no se toca.
   // ============================================================
+
+  _has_crosshair_layers() {
+    return !!(this.els.priceCrosshair && this.els.atrCrosshair);
+  }
 
   _fit_xhair(xhairCanvas, baseCanvas) {
     const dpr  = window.devicePixelRatio || 1;
@@ -398,15 +385,25 @@ class ChartEngine {
     const panel = (cv === this.els.priceCanvas) ? "price" : "atr";
     this._mouse      = { x: e.clientX - rect.left, y: e.clientY - rect.top, panel };
     this._hoverIndex = this.priceScale.x_to_index(this._mouse.x);
-    this._draw_crosshair_only();
+
+    if (this._has_crosshair_layers()) {
+      this._draw_crosshair_only();
+    } else {
+      this.request_render();
+    }
   }
 
   _on_canvas_leave() {
     this._mouse      = null;
     this._hoverIndex = null;
-    this._clear_crosshair();
-    if (this.els.statusHover) {
-      this.els.statusHover.textContent = "Mueve el cursor sobre el grafico...";
+
+    if (this._has_crosshair_layers()) {
+      this._clear_crosshair();
+      if (this.els.statusHover) {
+        this.els.statusHover.textContent = "Mueve el cursor sobre el grafico...";
+      }
+    } else {
+      this.request_render();
     }
   }
 
@@ -453,25 +450,29 @@ class ChartEngine {
     const win      = this.compute_window();
     const prevBars = this.visible_bars;
     const factor   = delta > 0 ? 1.6 : 1 / 1.6;
+
     this.visible_bars = factor < 1
       ? Math.floor(this.visible_bars * factor)
       : Math.ceil(this.visible_bars * factor);
+
     this._clamp_bars();
-    if (this.visible_bars !== prevBars) {
-      const n      = this.market.candles.length;
+
+    if (this.mode === "auto") {
+      // Comportamiento correcto del commit 0f638fc:
+      // en auto se mantiene fija la última vela real.
+      this.offset = Math.max(0, this.offset);
+    } else if (this.visible_bars !== prevBars) {
+      // En manual, el zoom horizontal se ancla al cursor.
+      const idxUnderCursor = win.virtualFirst + mouseX / this._lastBarW;
       const plotW  = this.priceScale.plot_width ||
                      (this.els.priceCanvas.getBoundingClientRect().width - PRICE_AXIS_W);
+      const n      = this.market.candles.length;
       const count  = Math.min(this.visible_bars, n);
       const newBarW  = plotW / count;
-      const curBarW  = plotW / Math.min(prevBars, n);
-      let anchorIdx  = win.virtualFirst + mouseX / curBarW;
-      let anchorX    = mouseX;
-      if (anchorIdx >= n) { anchorIdx = n - 1; anchorX = this.priceScale.index_to_center_x(n - 1); }
-      const newFirst = anchorIdx - anchorX / newBarW;
-      this.offset    = (n - 1) - count + 1 - newFirst;
-      const maxOff   = Math.max(0, n - 2);
-      if (this.offset > maxOff) this.offset = maxOff;
+      const newFirst = idxUnderCursor - mouseX / newBarW;
+      this.offset = Math.round((n - 1) - count + 1 - newFirst);
     }
+
     this._clamp_offset();
     this.request_render();
   }
@@ -480,25 +481,30 @@ class ChartEngine {
     const win      = this.compute_window();
     const prevBars = this.visible_bars;
     const factor   = delta > 0 ? 2.0 : 1 / 2.0;
+
     this.visible_bars = factor < 1
       ? Math.floor(this.visible_bars * factor)
       : Math.ceil(this.visible_bars * factor);
+
     this._clamp_bars();
+
     if (this.visible_bars !== prevBars) {
-      const n      = this.market.candles.length;
+      const idxUnderCursor = win.virtualFirst + mouseX / this._lastBarW;
       const plotW  = this.priceScale.plot_width ||
                      (this.els.priceCanvas.getBoundingClientRect().width - PRICE_AXIS_W);
+      const n      = this.market.candles.length;
       const count  = Math.min(this.visible_bars, n);
       const newBarW  = plotW / count;
-      const curBarW  = plotW / Math.min(prevBars, n);
-      let idxUnder   = win.virtualFirst + mouseX / curBarW;
-      let pivotX     = mouseX;
-      if (idxUnder >= n) { idxUnder = n - 1; pivotX = this.priceScale.index_to_center_x(n - 1); }
-      const newFirst = idxUnder - pivotX / newBarW;
-      this.offset    = (n - 1) - count + 1 - newFirst;
-      const maxOff   = Math.max(0, n - 2);
+      const newFirst = idxUnderCursor - mouseX / newBarW;
+
+      this.offset = Math.round((n - 1) - count + 1 - newFirst);
+
+      // Permite espacios vacíos antes/después, pero evita que todo el gráfico
+      // quede fuera por encima del último histórico real.
+      const maxOff = Math.max(0, n - 2);
       if (this.offset > maxOff) this.offset = maxOff;
     }
+
     this.request_render();
   }
 
@@ -520,6 +526,40 @@ class ChartEngine {
     this.atr_min = center - half * factor;
     this.atr_max = center + half * factor;
     this.request_render();
+  }
+
+  _draw_crosshair_all() {
+    if (!this._mouse || this._hoverIndex === null) return;
+
+    const win = this.compute_window();
+    if (this._hoverIndex < win.first || this._hoverIndex > win.last) return;
+
+    const cx = this.priceScale.index_to_center_x(this._hoverIndex);
+    if (cx < 0 || cx > this.priceScale.plot_width) return;
+
+    const priceCtx = this.els.priceCanvas.getContext("2d");
+    const atrCtx   = this.els.atrCanvas.getContext("2d");
+
+    this._draw_vline(priceCtx, cx, this.priceScale.height);
+    this._draw_vline(atrCtx,   cx, this.atrScale.height);
+
+    if (this._mouse.panel === "price") {
+      const price    = this.priceScale.y_to_value(this._mouse.y);
+      const snapped  = Math.ceil(price * 4 - 1e-9) / 4;
+      const snappedY = this.priceScale.value_to_y(snapped);
+      this._draw_hline(priceCtx, snappedY, this.priceScale.plot_width);
+      this._draw_y_label(priceCtx, snappedY, this.priceScale, snapped.toFixed(2));
+    } else {
+      this._draw_hline(atrCtx, this._mouse.y, this.atrScale.plot_width);
+      const atrVal = this.atrScale.y_to_value(this._mouse.y);
+      this._draw_y_label(atrCtx, this._mouse.y, this.atrScale, atrVal.toFixed(2));
+    }
+
+    const c = this.market.candles[this._hoverIndex];
+    if (c) {
+      const label = `${diaSemana(c.time)} ${c.time.slice(5, 10)} ${c.time.slice(11, 16)}`;
+      this._draw_x_label(atrCtx, cx, label);
+    }
   }
 
   // ============================================================
@@ -588,6 +628,7 @@ class ChartEngine {
 
   _update_hover_status() {
     if (!this.els.statusHover) return;
+
     if (this._hoverIndex !== null &&
         this._hoverIndex >= 0 && this._hoverIndex < this.market.candles.length) {
       const c      = this.market.candles[this._hoverIndex];
@@ -597,8 +638,11 @@ class ChartEngine {
       const fecha  = c.time.slice(0, 10);
       const hora   = c.time.slice(11, 16);
       const volTxt = c.volume != null ? c.volume.toLocaleString() : "-";
+
       this.els.statusHover.textContent =
         `${dow} ${fecha} ${hora}  O:${c.open} H:${c.high} L:${c.low} C:${c.close}  Vol:${volTxt}  ATR:${atrTxt}`;
+    } else {
+      this.els.statusHover.textContent = "Mueve el cursor sobre el grafico...";
     }
   }
 
