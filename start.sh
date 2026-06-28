@@ -5,7 +5,7 @@
 #  si el navegador estaba cerrado. Detener: Ctrl+C.
 # ============================================================
 
-URL="http://localhost:3000"
+URL="http://127.0.0.1:3000"
 
 cd "$(dirname "$0")/backend" || { echo "No encuentro la carpeta backend"; exit 1; }
 
@@ -22,9 +22,14 @@ lanzar_desacoplado() {
 abrir_navegador() {
   local url="$1"
 
-  # 1) Esperar (hasta ~15s) a que el servidor acepte conexiones
-  for _ in $(seq 1 30); do
-    (exec 3<>/dev/tcp/127.0.0.1/3000) 2>/dev/null && break
+  # 1) Esperar a que el servidor responda de verdad antes de abrir el navegador.
+  #    En WSL el backend puede tardar en cargar la caché inicial de datos.
+  for _ in $(seq 1 120); do
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsS "$url/api/info" >/dev/null 2>&1 && break
+    else
+      (exec 3<>/dev/tcp/127.0.0.1/3000) 2>/dev/null && break
+    fi
     sleep 0.5
   done
 
