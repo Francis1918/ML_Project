@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Trading Chart</title>
-  <link rel="stylesheet" href="styles.css?v=11" />
+  <link rel="stylesheet" href="styles.css?v=15" />
 </head>
 <body>
   <div id="app">
@@ -48,11 +48,14 @@
     <!-- Panel de precios (velas) -->
     <div class="panel" id="price-panel">
       <canvas id="price-canvas"></canvas>
+      <!-- Canvas superpuesto solo para crosshair (pointer-events:none) -->
+      <canvas id="price-xhair" class="xhair-canvas"></canvas>
     </div>
 
     <!-- Panel del indicador ATR -->
     <div class="panel" id="atr-panel">
       <canvas id="atr-canvas"></canvas>
+      <canvas id="atr-xhair" class="xhair-canvas"></canvas>
     </div>
 
     <!-- Barra de estado inferior -->
@@ -64,10 +67,10 @@
 
   </div>
 
-  <script src="scales.js?v=11"></script>
-  <script src="price_panel.js?v=11"></script>
-  <script src="atr_panel.js?v=11"></script>
-  <script src="chart_engine.js?v=11"></script>
-  <script src="app.js?v=11"></script>
+  <script src="scales.js?v=15"></script>
+  <script src="price_panel.js?v=15"></script>
+  <script src="atr_panel.js?v=15"></script>
+  <script src="chart_engine.js?v=15"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>
