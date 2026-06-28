@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Trading Chart</title>
-  <link rel="stylesheet" href="styles.css?v=16" />
+  <link rel="stylesheet" href="styles.css?v=17" />
 </head>
 <body>
   <div id="app">
@@ -22,67 +22,88 @@
         <button class="tf-btn" data-tf="W">W</button>
       </div>
 
-      <!-- Checklist de capas visuales. Solo filtra el render; no cambia calculos. -->
-      <div id="overlay-controls" class="overlay-controls" aria-label="Capas visuales">
-        <span class="overlay-title">Capas</span>
+      <!-- Dropdown multi-select de overlays. Solo filtra el render; no cambia calculos. -->
+      <div id="overlay-controls" class="overlay-menu" aria-label="Indicadores y overlays">
+        <button class="overlay-root" type="button" aria-haspopup="true" aria-expanded="false">
+          <span class="overlay-root-icon">◈</span>
+          Indicadores y overlays
+          <span class="overlay-root-caret">▾</span>
+        </button>
 
-        <label class="layer-check layer-master">
-          <input type="checkbox" data-layer-toggle="smc_all" checked /> SMC
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="smc_hh" data-layer-parent="smc_all" checked /> HH
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="smc_hl" data-layer-parent="smc_all" checked /> HL
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="smc_lh" data-layer-parent="smc_all" checked /> LH
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="smc_ll" data-layer-parent="smc_all" checked /> LL
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="smc_choch" data-layer-parent="smc_all" checked /> CHoCH
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="smc_bos" data-layer-parent="smc_all" checked /> BOS
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="smc_fvg" data-layer-parent="smc_all" checked /> FVG
-        </label>
+        <div class="overlay-dropdown overlay-main-menu" role="menu" aria-label="Indicadores y overlays">
+          <div class="overlay-submenu" role="none">
+            <button class="overlay-menu-row overlay-parent-row" type="button" role="menuitem" aria-haspopup="true">
+              <span>SMC</span>
+              <span class="overlay-chevron">›</span>
+            </button>
 
-        <span class="overlay-sep"></span>
+            <div class="overlay-submenu-panel" role="menu" aria-label="SMC overlays">
+              <button class="overlay-menu-item layer-master" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="smc_all">
+                <span class="overlay-check">✓</span><span>Motor SMC</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="smc_hh" data-layer-parent="smc_all">
+                <span class="overlay-check">✓</span><span>HH</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="smc_hl" data-layer-parent="smc_all">
+                <span class="overlay-check">✓</span><span>HL</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="smc_lh" data-layer-parent="smc_all">
+                <span class="overlay-check">✓</span><span>LH</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="smc_ll" data-layer-parent="smc_all">
+                <span class="overlay-check">✓</span><span>LL</span>
+              </button>
+              <div class="overlay-menu-separator" role="separator"></div>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="smc_choch" data-layer-parent="smc_all">
+                <span class="overlay-check">✓</span><span>CHoCH</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="smc_bos" data-layer-parent="smc_all">
+                <span class="overlay-check">✓</span><span>BOS</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="smc_fvg" data-layer-parent="smc_all">
+                <span class="overlay-check">✓</span><span>FVG fade</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="market_regime" data-layer-parent="smc_all">
+                <span class="overlay-check">✓</span><span>Market Regime</span>
+              </button>
+            </div>
+          </div>
 
-        <label class="layer-check layer-master">
-          <input type="checkbox" data-layer-toggle="liq_all" checked /> Liquidez
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="liq_bsl" data-layer-parent="liq_all" checked /> BSL
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="liq_ssl" data-layer-parent="liq_all" checked /> SSL
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="liq_eqh" data-layer-parent="liq_all" checked /> EQH
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="liq_eql" data-layer-parent="liq_all" checked /> EQL
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="liq_grab" data-layer-parent="liq_all" checked /> Grab
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="liq_sweep" data-layer-parent="liq_all" checked /> Sweep
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="liq_run" data-layer-parent="liq_all" checked /> Run
-        </label>
+          <div class="overlay-submenu" role="none">
+            <button class="overlay-menu-row overlay-parent-row" type="button" role="menuitem" aria-haspopup="true">
+              <span>Liquidez</span>
+              <span class="overlay-chevron">›</span>
+            </button>
 
-        <span class="overlay-sep"></span>
-
-        <label class="layer-check">
-          <input type="checkbox" data-layer-toggle="market_regime" checked /> Regime
-        </label>
+            <div class="overlay-submenu-panel" role="menu" aria-label="Liquidity overlays">
+              <button class="overlay-menu-item layer-master" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="liq_all">
+                <span class="overlay-check">✓</span><span>Módulo completo</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="liq_bsl" data-layer-parent="liq_all">
+                <span class="overlay-check">✓</span><span>BSL</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="liq_ssl" data-layer-parent="liq_all">
+                <span class="overlay-check">✓</span><span>SSL</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="liq_eqh" data-layer-parent="liq_all">
+                <span class="overlay-check">✓</span><span>EQH</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="liq_eql" data-layer-parent="liq_all">
+                <span class="overlay-check">✓</span><span>EQL</span>
+              </button>
+              <div class="overlay-menu-separator" role="separator"></div>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="liq_grab" data-layer-parent="liq_all">
+                <span class="overlay-check">✓</span><span>Liquidity Grab</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="liq_sweep" data-layer-parent="liq_all">
+                <span class="overlay-check">✓</span><span>Sweep</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="liq_run" data-layer-parent="liq_all">
+                <span class="overlay-check">✓</span><span>Run</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Controles de Replay -->
@@ -133,7 +154,7 @@
   <script src="scales.js?v=16"></script>
   <script src="price_panel.js?v=16"></script>
   <script src="atr_panel.js?v=16"></script>
-  <script src="chart_engine.js?v=16"></script>
-  <script src="app.js?v=16"></script>
+  <script src="chart_engine.js?v=17"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>

@@ -36,12 +36,23 @@ const Replay = {
 const WINDOW_LIMIT = 500;
 
 
-// Estado de la checklist de capas. Vive en el frontend: no cambia el cálculo
-// del backend, solo filtra qué shapes dibuja ChartEngine.
+// Estado del menu multi-select de overlays. Vive en el frontend:
+// no cambia el cálculo del backend, solo filtra qué shapes dibuja ChartEngine.
+function _layerItemIsChecked(item) {
+  return item.getAttribute('aria-checked') !== 'false';
+}
+
+function _setLayerItemChecked(item, checked) {
+  item.setAttribute('aria-checked', checked ? 'true' : 'false');
+  item.classList.toggle('is-off', !checked);
+  const check = item.querySelector('.overlay-check');
+  if (check) check.textContent = checked ? '✓' : '';
+}
+
 function readOverlayVisibilityFromUI() {
   const state = {};
-  document.querySelectorAll('[data-layer-toggle]').forEach(input => {
-    state[input.dataset.layerToggle] = input.checked;
+  document.querySelectorAll('[data-layer-toggle]').forEach(item => {
+    state[item.dataset.layerToggle] = _layerItemIsChecked(item);
   });
   return state;
 }
@@ -50,16 +61,19 @@ function _syncOverlayControlStates() {
   const controls = document.getElementById('overlay-controls');
   if (!controls) return;
 
-  const smcAll = controls.querySelector('[data-layer-toggle="smc_all"]')?.checked ?? true;
-  controls.querySelectorAll('[data-layer-parent="smc_all"]').forEach(input => {
-    input.disabled = !smcAll;
-    input.closest('label')?.classList.toggle('disabled', !smcAll);
+  const smcAllItem = controls.querySelector('[data-layer-toggle="smc_all"]');
+  const liqAllItem = controls.querySelector('[data-layer-toggle="liq_all"]');
+  const smcAll = smcAllItem ? _layerItemIsChecked(smcAllItem) : true;
+  const liqAll = liqAllItem ? _layerItemIsChecked(liqAllItem) : true;
+
+  controls.querySelectorAll('[data-layer-parent="smc_all"]').forEach(item => {
+    item.classList.toggle('is-muted', !smcAll);
+    item.setAttribute('aria-disabled', smcAll ? 'false' : 'true');
   });
 
-  const liqAll = controls.querySelector('[data-layer-toggle="liq_all"]')?.checked ?? true;
-  controls.querySelectorAll('[data-layer-parent="liq_all"]').forEach(input => {
-    input.disabled = !liqAll;
-    input.closest('label')?.classList.toggle('disabled', !liqAll);
+  controls.querySelectorAll('[data-layer-parent="liq_all"]').forEach(item => {
+    item.classList.toggle('is-muted', !liqAll);
+    item.setAttribute('aria-disabled', liqAll ? 'false' : 'true');
   });
 }
 
@@ -72,11 +86,32 @@ function initOverlayControls() {
   const controls = document.getElementById('overlay-controls');
   if (!controls) return;
 
-  controls.querySelectorAll('[data-layer-toggle]').forEach(input => {
-    input.addEventListener('change', () => {
+  const root = controls.querySelector('.overlay-root');
+  const setExpanded = (expanded) => {
+    if (root) root.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  };
+
+  controls.addEventListener('mouseenter', () => setExpanded(true));
+  controls.addEventListener('mouseleave', () => setExpanded(false));
+
+  controls.querySelectorAll('[data-layer-toggle]').forEach(item => {
+    _setLayerItemChecked(item, _layerItemIsChecked(item));
+
+    item.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      _setLayerItemChecked(item, !_layerItemIsChecked(item));
       _syncOverlayControlStates();
       applyOverlayVisibilityFromUI();
     });
+  });
+
+  // Cierre rapido si el usuario pulsa Escape mientras navega el menu.
+  controls.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') {
+      controls.blur();
+      setExpanded(false);
+    }
   });
 
   _syncOverlayControlStates();
