@@ -63,6 +63,9 @@
               <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="smc_fvg" data-layer-parent="smc_all">
                 <span class="overlay-check">✓</span><span>FVG fade</span>
               </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="smc_fib" data-layer-parent="smc_all">
+                <span class="overlay-check">✓</span><span>Fibonacci auto</span>
+              </button>
               <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="market_regime" data-layer-parent="smc_all">
                 <span class="overlay-check">✓</span><span>Market Regime</span>
               </button>
@@ -100,6 +103,53 @@
               </button>
               <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="liq_run" data-layer-parent="liq_all">
                 <span class="overlay-check">✓</span><span>Run</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="liq_htf" data-layer-parent="liq_all">
+                <span class="overlay-check">✓</span><span>Liquidez HTF</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="overlay-submenu" role="none">
+            <button class="overlay-menu-row overlay-parent-row" type="button" role="menuitem" aria-haspopup="true">
+              <span>Estrategias</span>
+              <span class="overlay-chevron">›</span>
+            </button>
+
+            <div class="overlay-submenu-panel" role="menu" aria-label="Strategy overlays">
+              <button class="overlay-menu-item layer-master" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="strategy_all">
+                <span class="overlay-check">✓</span><span>Strategy Builder</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="strategy_supertrend" data-layer-parent="strategy_all">
+                <span class="overlay-check">✓</span><span>SuperTrend</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="strategy_halftrend" data-layer-parent="strategy_all">
+                <span class="overlay-check">✓</span><span>HalfTrend</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="strategy_range" data-layer-parent="strategy_all">
+                <span class="overlay-check">✓</span><span>Range Filter</span>
+              </button>
+              <div class="overlay-menu-separator" role="separator"></div>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="strategy_supply" data-layer-parent="strategy_all">
+                <span class="overlay-check">✓</span><span>Supply Zones</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="strategy_demand" data-layer-parent="strategy_all">
+                <span class="overlay-check">✓</span><span>Demand Zones</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="strategy_ob" data-layer-parent="strategy_all">
+                <span class="overlay-check">✓</span><span>Order Blocks</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="strategy_sr" data-layer-parent="strategy_all">
+                <span class="overlay-check">✓</span><span>Support / Resistance</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="strategy_trendlines" data-layer-parent="strategy_all">
+                <span class="overlay-check">✓</span><span>Trendlines</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="strategy_channels" data-layer-parent="strategy_all">
+                <span class="overlay-check">✓</span><span>Channels</span>
+              </button>
+              <button class="overlay-menu-item" type="button" role="menuitemcheckbox" aria-checked="true" data-layer-toggle="strategy_daily" data-layer-parent="strategy_all">
+                <span class="overlay-check">✓</span><span>Daily body/wick</span>
               </button>
             </div>
           </div>
@@ -159,7 +209,7 @@
   <script src="scales.js?v=16"></script>
   <script src="price_panel.js?v=16"></script>
   <script src="atr_panel.js?v=16"></script>
-  <script src="chart_engine.js?v=20"></script>
-  <script src="app.js?v=21"></script>
+  <script src="chart_engine.js?v=21"></script>
+  <script src="app.js?v=22"></script>
 </body>
 </html>

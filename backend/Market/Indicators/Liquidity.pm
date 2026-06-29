@@ -419,6 +419,9 @@ sub _emit_event {
     # Volume weight del sweep: candle donde ocurrio el barrido
     my $sweep_idx = $sc->{swept_index} // $resolved_idx;
     my $sweep_vw  = _vol_weight($self, $self->{_candles}, $sweep_idx);
+    my $sweep_candle = (defined $sweep_idx && $self->{_candles} && $sweep_idx <= $#{ $self->{_candles} })
+        ? $self->{_candles}[$sweep_idx]
+        : undef;
     my $sweep_time = (defined $sweep_idx && $self->{_candles} && $sweep_idx <= $#{ $self->{_candles} })
         ? $self->{_candles}[$sweep_idx]{time}
         : undef;
@@ -431,6 +434,10 @@ sub _emit_event {
         swept_index        => $sc->{swept_index},
         swept_time         => $sweep_time,
         swept_price        => $sc->{swept_price},
+        swept_candle_high  => $sweep_candle ? $sweep_candle->{high} : undef,
+        swept_candle_low   => $sweep_candle ? $sweep_candle->{low}  : undef,
+        swept_candle_open  => $sweep_candle ? $sweep_candle->{open} : undef,
+        swept_candle_close => $sweep_candle ? $sweep_candle->{close}: undef,
         close_price        => $sc->{close_price},
         state_path         => ['DETECTED', 'SWEPT',
                                ($classification eq 'RUN' ? 'ACCEPTANCE' : 'RECLAIMED'),
@@ -438,6 +445,8 @@ sub _emit_event {
         classification     => $classification,
         resolved_index     => $resolved_idx,
         resolved_time      => $candle->{time},
+        resolved_candle_high => $candle->{high},
+        resolved_candle_low  => $candle->{low},
         confirmation_bars  => ($resolved_idx - ($sc->{swept_index} // $resolved_idx)),
         related_fvg_ids    => [],
         projected_effect   => $effect,

@@ -13,8 +13,10 @@ use Market::IndicatorManager;
 use Market::Indicators::Liquidity;
 use Market::Indicators::SMC_Structures;
 use Market::Indicators::MarketRegime;
+use Market::Indicators::Strategy_Builder;
 use Market::Overlays::Liquidity;
 use Market::Overlays::SMC_Structures;
+use Market::Overlays::Strategy_Builder;
 
 # ============================================================
 #  app.pl  -- Punto de entrada / servidor del sistema.
@@ -185,6 +187,21 @@ sub _build_overlay_cache_for {
     );
     app->log->info(sprintf("[cache][%s] MarketRegime en %.3fs", $tf, tv_interval($t3)));
 
+    # Strategy Builder
+    my $t3b = [gettimeofday];
+    my $strategy = Market::Indicators::Strategy_Builder->compute(
+        candles           => $candles,
+        atr_series        => $atr_vals,
+        liquidity_levels  => $liq->{levels},
+        liquidity_events  => $liq->{events},
+        structure_events  => $smc->{structures},
+        pivots            => $smc->{pivots},
+        max_visible_index => $max_idx,
+        timeframe         => $tf,
+        daily_candles     => _daily_candles_until(_add_minutes_iso($candles->[$max_idx]{time}, _tf_minutes($tf)), $tf),
+    );
+    app->log->info(sprintf("[cache][%s] Strategy_Builder en %.3fs", $tf, tv_interval($t3b)));
+
     # Overlay shapes
     my $t4 = [gettimeofday];
     my $liq_shapes = Market::Overlays::Liquidity->build_shapes(
@@ -197,6 +214,11 @@ sub _build_overlay_cache_for {
         structures        => $smc->{structures},
         fvgs              => $smc->{fvgs},
         fib_sets          => $smc->{fib_sets},
+        max_visible_index => $max_idx,
+        timeframe         => $tf,
+    );
+    my $strategy_shapes = Market::Overlays::Strategy_Builder->build_shapes(
+        strategy          => $strategy,
         max_visible_index => $max_idx,
         timeframe         => $tf,
     );
@@ -213,8 +235,10 @@ sub _build_overlay_cache_for {
         smc_fvgs       => $smc->{fvgs},
         smc_fib_sets   => $smc->{fib_sets},
         regime_states  => $regime_states,
+        strategy       => $strategy,
         liq_shapes     => $liq_shapes,
         smc_shapes     => $smc_shapes,
+        strategy_shapes => $strategy_shapes,
     };
 
     app->log->info(sprintf(
@@ -224,7 +248,7 @@ sub _build_overlay_cache_for {
         scalar @{ $smc->{pivots} },
         scalar @{ $smc->{structures} },
         scalar @{ $smc->{fvgs} },
-        scalar(@$liq_shapes) + scalar(@$smc_shapes),
+        scalar(@$liq_shapes) + scalar(@$smc_shapes) + scalar(@$strategy_shapes),
     ));
 }
 
@@ -274,6 +298,17 @@ sub _build_window_overlay_for {
         max_visible_index => $max_idx,
         timeframe         => $tf,
     );
+    my $strategy = Market::Indicators::Strategy_Builder->compute(
+        candles           => \@candles,
+        atr_series        => \@atr,
+        liquidity_levels  => $liq->{levels},
+        liquidity_events  => $liq->{events},
+        structure_events  => $smc->{structures},
+        pivots            => $smc->{pivots},
+        max_visible_index => $max_idx,
+        timeframe         => $tf,
+        daily_candles     => _daily_candles_until($visible_until_time, $tf),
+    );
 
     my $liq_shapes_all = Market::Overlays::Liquidity->build_shapes(
         levels            => $liq->{levels},
@@ -288,12 +323,20 @@ sub _build_window_overlay_for {
         max_visible_index => $max_idx,
         timeframe         => $tf,
     );
+    my $strategy_shapes_all = Market::Overlays::Strategy_Builder->build_shapes(
+        strategy          => $strategy,
+        max_visible_index => $max_idx,
+        timeframe         => $tf,
+    );
 
     my $liq_shapes = _clip_shapes_window(
         $liq_shapes_all, $vis_start_local, $vis_end_local, $calc_start, $cache->{candles},
     );
     my $smc_shapes = _clip_shapes_window(
         $smc_shapes_all, $vis_start_local, $vis_end_local, $calc_start, $cache->{candles},
+    );
+    my $strategy_shapes = _clip_shapes_window(
+        $strategy_shapes_all, $vis_start_local, $vis_end_local, $calc_start, $cache->{candles},
     );
     my $cur_regime = ($regime_states && @$regime_states && $vis_end_local < scalar @$regime_states)
                      ? $regime_states->[$vis_end_local]
@@ -303,6 +346,7 @@ sub _build_window_overlay_for {
         market_regime => $cur_regime,
         liquidity     => { overlay_shapes => $liq_shapes },
         smc           => { overlay_shapes => $smc_shapes },
+        strategy      => { overlay_shapes => $strategy_shapes },
         stats         => {
             calc_start => $calc_start,
             calc_end   => $calc_end,
@@ -317,7 +361,7 @@ sub _build_window_overlay_for {
     app->log->info(sprintf(
         "[cache][window][%s] LISTO en %.3fs | abs=%d..%d calc=%d..%d candles=%d shapes=%d",
         $tf, tv_interval($t0), $win_start, $win_end, $calc_start, $calc_end,
-        scalar @candles, scalar(@$liq_shapes) + scalar(@$smc_shapes),
+        scalar @candles, scalar(@$liq_shapes) + scalar(@$smc_shapes) + scalar(@$strategy_shapes),
     ));
 
     return $result;
@@ -380,6 +424,20 @@ sub _volume_sources {
         '5m'  => $data->{'5m'}  // [],
         '15m' => $data->{'15m'} // [],
     };
+}
+
+sub _daily_candles_until {
+    my ($cutoff_time, $current_tf) = @_;
+    return [] if ($current_tf // '') eq 'D' || ($current_tf // '') eq 'W';
+    return [] unless defined $cutoff_time;
+
+    _build_market_cache_for('D');
+    my $daily = $CACHE{'D'}{candles} // [];
+    return [] unless @$daily;
+
+    my $max = _closed_htf_max_index($daily, 'D', $cutoff_time);
+    return [] if $max < 0;
+    return [ @$daily[0 .. $max] ];
 }
 
 sub _tf_minutes {
@@ -694,6 +752,7 @@ get '/api/info' => sub {
                 pivots     => scalar @{ $cache->{smc_pivots}     // [] },
                 structures => scalar @{ $cache->{smc_structures} // [] },
                 fvgs       => scalar @{ $cache->{smc_fvgs}       // [] },
+                strategy_shapes => scalar @{ $cache->{strategy_shapes} // [] },
             };
         } else {
             $counts{$tf} = { cached => \0, market => \0, overlays => \0, candles => 0 };
@@ -807,6 +866,7 @@ get '/api/overlays' => sub {
         my $mr = $fast->{market_regime};
         my $liquidity = { %{ $fast->{liquidity} } };
         my $smc       = { %{ $fast->{smc} } };
+        my $strategy  = { %{ $fast->{strategy} // { overlay_shapes => [] } } };
         my $htf_shapes = _build_htf_liquidity_shapes_for($tf, $win_start, $win_end, $local_max);
         $liquidity->{overlay_shapes} = [ @{ $liquidity->{overlay_shapes} // [] }, @$htf_shapes ];
         if ($absolute) {
@@ -814,6 +874,8 @@ get '/api/overlays' => sub {
                 _shift_shape_indices($liquidity->{overlay_shapes}, $win_start);
             $smc->{overlay_shapes} =
                 _shift_shape_indices($smc->{overlay_shapes}, $win_start);
+            $strategy->{overlay_shapes} =
+                _shift_shape_indices($strategy->{overlay_shapes}, $win_start);
         }
         return $c->render(json => {
             timeframe         => $tf,
@@ -840,6 +902,7 @@ get '/api/overlays' => sub {
             },
             liquidity => $liquidity,
             smc       => $smc,
+            strategy  => $strategy,
         });
     }
 
@@ -865,7 +928,7 @@ get '/api/overlays' => sub {
                         : { state => 'UNKNOWN', reason => 'fuera de rango', replay_safe => 1 };
 
     # Datos crudos: solo para inspeccion/debug; son grandes y no se usan para dibujar.
-    my ($liq_levels, $liq_events, $pivots, $structures, $fvgs, $fib_sets);
+    my ($liq_levels, $liq_events, $pivots, $structures, $fvgs, $fib_sets, $strategy_debug);
     if ($debug) {
         $liq_levels = _clip_array($cache->{liq_levels}, $win_end, 'start_index');
         $liq_events = _clip_array($cache->{liq_events}, $win_end, 'swept_index');
@@ -873,14 +936,17 @@ get '/api/overlays' => sub {
         $structures = _clip_array($cache->{smc_structures}, $win_end, 'break_index');
         $fvgs       = _clip_array($cache->{smc_fvgs},       $win_end, 'end_index');
         $fib_sets   = $cache->{smc_fib_sets};
+        $strategy_debug = $cache->{strategy};
     }
 
     # Shapes: filtrar al rango [win_start, win_end] y normalizar a 0-based.
     my $liq_shapes = _clip_shapes_window($cache->{liq_shapes}, $win_start, $win_end, 0, $cache->{candles});
     my $smc_shapes = _clip_shapes_window($cache->{smc_shapes}, $win_start, $win_end, 0, $cache->{candles});
+    my $strategy_shapes = _clip_shapes_window($cache->{strategy_shapes} // [], $win_start, $win_end, 0, $cache->{candles});
     if ($absolute) {
         $liq_shapes = _shift_shape_indices($liq_shapes, $win_start);
         $smc_shapes = _shift_shape_indices($smc_shapes, $win_start);
+        $strategy_shapes = _shift_shape_indices($strategy_shapes, $win_start);
     }
 
     # HTF: niveles activos de temporalidades superiores.
@@ -894,6 +960,9 @@ get '/api/overlays' => sub {
     my $smc = {
         overlay_shapes => $smc_shapes,
     };
+    my $strategy = {
+        overlay_shapes => $strategy_shapes,
+    };
     if ($debug) {
         $liquidity->{levels}     = $liq_levels;
         $liquidity->{events}     = $liq_events;
@@ -901,6 +970,7 @@ get '/api/overlays' => sub {
         $smc->{structures}       = $structures;
         $smc->{fvgs}             = $fvgs;
         $smc->{fib_sets}         = $fib_sets;
+        $strategy->{data}        = $strategy_debug;
     }
 
     $c->render(json => {
@@ -926,6 +996,7 @@ get '/api/overlays' => sub {
         },
         liquidity => $liquidity,
         smc       => $smc,
+        strategy  => $strategy,
     });
 };
 

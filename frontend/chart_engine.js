@@ -34,6 +34,25 @@ const OV_COLORS = {
   fvg_bearish:      '#EF5350',
   fvg_high_reaction:'#FFD700',
   fib_level:        '#9E9E9E',
+  strategy_supertrend_bullish:   '#00C853',
+  strategy_supertrend_bearish:   '#FF5252',
+  strategy_halftrend_bullish:    '#8BC34A',
+  strategy_halftrend_bearish:    '#F06292',
+  strategy_range_filter_bullish: '#42A5F5',
+  strategy_range_filter_bearish: '#AB47BC',
+  strategy_range_filter_neutral: '#78909C',
+  supply:           '#EF5350',
+  demand:           '#26A69A',
+  order_block_bullish: '#66BB6A',
+  order_block_bearish: '#FF7043',
+  support:          '#00BCD4',
+  resistance:       '#FFB300',
+  trendline_bullish:'#7CB342',
+  trendline_bearish:'#F4511E',
+  channel_bullish:  '#9CCC65',
+  channel_bearish:  '#FF8A65',
+  daily_body:       '#B0BEC5',
+  daily_wick:       '#78909C',
 };
 
 function _ov_dash(style) {
@@ -65,6 +84,18 @@ const DEFAULT_OVERLAY_VISIBILITY = Object.freeze({
   liq_sweep:     true,
   liq_run:       true,
   liq_htf:       true,
+
+  strategy_all:        true,
+  strategy_supertrend: true,
+  strategy_halftrend:  true,
+  strategy_range:      true,
+  strategy_supply:     true,
+  strategy_demand:     true,
+  strategy_ob:         true,
+  strategy_sr:         true,
+  strategy_trendlines: true,
+  strategy_channels:   true,
+  strategy_daily:      true,
 
   market_regime: true,
 });
@@ -881,6 +912,18 @@ class ChartEngine {
     if (role === 'sweep_up' || role === 'sweep_down') return this._overlay_layer_on('liq_sweep');
     if (role === 'run') return this._overlay_layer_on('liq_run');
 
+    if (src === 'strategy' && !this._overlay_layer_on('strategy_all')) return false;
+    if (role.startsWith('strategy_supertrend_')) return this._overlay_layer_on('strategy_supertrend');
+    if (role.startsWith('strategy_halftrend_')) return this._overlay_layer_on('strategy_halftrend');
+    if (role.startsWith('strategy_range_filter_')) return this._overlay_layer_on('strategy_range');
+    if (role === 'supply') return this._overlay_layer_on('strategy_supply');
+    if (role === 'demand') return this._overlay_layer_on('strategy_demand');
+    if (role.startsWith('order_block_')) return this._overlay_layer_on('strategy_ob');
+    if (role === 'support' || role === 'resistance') return this._overlay_layer_on('strategy_sr');
+    if (role.startsWith('trendline_')) return this._overlay_layer_on('strategy_trendlines');
+    if (role.startsWith('channel_')) return this._overlay_layer_on('strategy_channels');
+    if (role === 'daily_body' || role === 'daily_wick') return this._overlay_layer_on('strategy_daily');
+
     return true;
   }
 
@@ -919,13 +962,14 @@ class ChartEngine {
     const s       = this.priceScale;
     const lshapes = this.overlays.liquidity?.overlay_shapes ?? [];
     const sshapes = this.overlays.smc?.overlay_shapes       ?? [];
+    const tshapes = this.overlays.strategy?.overlay_shapes  ?? [];
 
     const rects  = [];
     const lines  = [];
     const labels = [];
     let htfLabelCount = 0;
 
-    for (const sh of [...lshapes, ...sshapes]) {
+    for (const sh of [...lshapes, ...sshapes, ...tshapes]) {
       if (!sh.visible_by_default) continue;
       if (!this._is_overlay_shape_visible(sh)) continue;
       const localShape = this._shape_with_local_indices(sh);
@@ -1014,16 +1058,18 @@ class ChartEngine {
     const x2    = Math.min(sh.x2_index ?? sh.x1_index, win.last + 1);
     const px1   = s.index_to_center_x(x1);
     const px2   = s.index_to_center_x(x2);
-    const py    = s.value_to_y(sh.y1_price);
-    if (py < 0 || py > s.height) return;
+    const y2Price = sh.y2_price ?? sh.y1_price;
+    const py1   = s.value_to_y(sh.y1_price);
+    const py2   = s.value_to_y(y2Price);
+    if ((py1 < 0 && py2 < 0) || (py1 > s.height && py2 > s.height)) return;
     ctx.save();
     ctx.globalAlpha = sh.opacity ?? 0.8;
     ctx.strokeStyle = color;
     ctx.lineWidth   = sh.kind === 'fib_line' ? 0.8 : 1;
     ctx.setLineDash(_ov_dash(sh.line_style));
     ctx.beginPath();
-    ctx.moveTo(px1, Math.round(py) + 0.5);
-    ctx.lineTo(px2, Math.round(py) + 0.5);
+    ctx.moveTo(px1, Math.round(py1) + 0.5);
+    ctx.lineTo(px2, Math.round(py2) + 0.5);
     ctx.stroke();
     if (sh.kind === 'fib_line' && sh.text) {
       ctx.setLineDash([]);
@@ -1032,7 +1078,7 @@ class ChartEngine {
       ctx.font         = '9px Arial';
       ctx.textBaseline = 'bottom';
       ctx.textAlign    = 'right';
-      ctx.fillText(sh.text, px2 - 2, Math.round(py) - 1);
+      ctx.fillText(sh.text, px2 - 2, Math.round(py2) - 1);
     }
     ctx.restore();
   }

@@ -24,7 +24,7 @@ use warnings;
 # ============================================================
 
 use constant SWING_K    => 3;
-use constant FIB_RATIOS => [0.236, 0.382, 0.5, 0.618, 0.786];
+use constant FIB_RATIOS => [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
 use constant FADE_RATE  => 0.03;
 use constant INIT_OP    => 0.40;
 use constant HR_OP      => 0.70;
@@ -154,97 +154,86 @@ sub _label_sequence {
 sub _build_structures {
     my ($candles, $pivots, $max_idx, $tf, $liq_evts) = @_;
 
-    my @highs = sort { $a->{index} <=> $b->{index} }
-                grep { $_->{kind} eq 'high' && defined $_->{rank} } @$pivots;
-    my @lows  = sort { $a->{index} <=> $b->{index} }
-                grep { $_->{kind} eq 'low'  && defined $_->{rank} } @$pivots;
+    my @confirmed = sort {
+        ($a->{confirmed_at} // 0) <=> ($b->{confirmed_at} // 0)
+            || ($a->{index} // 0) <=> ($b->{index} // 0)
+    } grep { defined $_->{rank} } @$pivots;
 
-    return [] unless @highs && @lows;
+    return [] unless @confirmed;
 
-    my %broken;  # price_str => 1 (nivel ya roto, no repetir)
-    my $trend = 'unknown';
+    my %broken;  # scope|kind|pivot_id => 1 (nivel ya roto, no repetir)
+    my %ctx = (
+        external => { trend => 'unknown', high => undef, low => undef },
+        internal => { trend => 'unknown', high => undef, low => undef },
+    );
     my @out;
-
-    # Punteros al siguiente pivot relevante (confirmado antes de i)
-    my $hi_ptr = 0;
-    my $lo_ptr = 0;
-
-    # Indice del ultimo major high/low disponible hasta max_visible_index
-    my $cur_major_high = undef;
-    my $cur_major_low  = undef;
+    my $ptr = 0;
 
     for my $i (1 .. $max_idx) {
         last if $i > $#$candles;
         my $c = $candles->[$i];
 
-        # Actualizar punteros: aceptar pivots confirmados hasta i
-        while ($hi_ptr <= $#highs && $highs[$hi_ptr]{confirmed_at} <= $i) {
-            $cur_major_high = $highs[$hi_ptr]
-                if ($highs[$hi_ptr]{rank}//'minor') eq 'major';
-            $hi_ptr++;
-        }
-        while ($lo_ptr <= $#lows && $lows[$lo_ptr]{confirmed_at} <= $i) {
-            $cur_major_low = $lows[$lo_ptr]
-                if ($lows[$lo_ptr]{rank}//'minor') eq 'major';
-            $lo_ptr++;
+        # Actualizar pivots confirmados hasta i. Los major alimentan estructura
+        # externa; los minor alimentan estructura interna.
+        while ($ptr <= $#confirmed && $confirmed[$ptr]{confirmed_at} <= $i) {
+            my $p = $confirmed[$ptr];
+            my $scope = (($p->{rank} // 'minor') eq 'major') ? 'external' : 'internal';
+            $ctx{$scope}{ $p->{kind} } = $p;
+            $ptr++;
         }
 
-        # --- Ruptura alcista ---
-        if (defined $cur_major_high
-            && $c->{close} > $cur_major_high->{price}
-            && !$broken{ $cur_major_high->{price} }) {
+        for my $scope (qw(external internal)) {
+            my $hi = $ctx{$scope}{high};
+            if ($hi && $c->{close} > $hi->{price}) {
+                my $key = join('|', $scope, 'high', $hi->{id});
+                if (!$broken{$key}) {
+                    $broken{$key} = 1;
+                    my $type = ($ctx{$scope}{trend} eq 'bearish') ? 'CHOCH' : 'BOS';
+                    push @out, _structure_event(
+                        $type, 'bullish', $tf, $hi, $i, $c, $scope, $liq_evts,
+                    );
+                    $ctx{$scope}{trend} = 'bullish';
+                }
+            }
 
-            $broken{ $cur_major_high->{price} } = 1;
-            my $type = ($trend eq 'bearish') ? 'CHOCH' : 'BOS';
-            push @out, {
-                id             => _new_id(),
-                type           => $type,
-                direction      => 'bullish',
-                timeframe      => $tf,
-                pivot_id       => $cur_major_high->{id},
-                break_index    => $i,
-                break_time     => $c->{time},
-                break_price    => $cur_major_high->{price},
-                close_price    => $c->{close},
-                confirmed      => 1,
-                break_mode     => 'close',
-                scope          => $cur_major_high->{scope} // 'external',
-                real_or_false  => ($type eq 'CHOCH' && $trend eq 'bearish') ? 'real' : 'real',
-                quality_score  => _quality($c, $liq_evts, $i),
-                liquidity_context => _near_liq($liq_evts, $i),
-            };
-            $trend = 'bullish';
-        }
-
-        # --- Ruptura bajista ---
-        if (defined $cur_major_low
-            && $c->{close} < $cur_major_low->{price}
-            && !$broken{ $cur_major_low->{price} }) {
-
-            $broken{ $cur_major_low->{price} } = 1;
-            my $type = ($trend eq 'bullish') ? 'CHOCH' : 'BOS';
-            push @out, {
-                id             => _new_id(),
-                type           => $type,
-                direction      => 'bearish',
-                timeframe      => $tf,
-                pivot_id       => $cur_major_low->{id},
-                break_index    => $i,
-                break_time     => $c->{time},
-                break_price    => $cur_major_low->{price},
-                close_price    => $c->{close},
-                confirmed      => 1,
-                break_mode     => 'close',
-                scope          => $cur_major_low->{scope} // 'external',
-                real_or_false  => 'real',
-                quality_score  => _quality($c, $liq_evts, $i),
-                liquidity_context => _near_liq($liq_evts, $i),
-            };
-            $trend = 'bearish';
+            my $lo = $ctx{$scope}{low};
+            if ($lo && $c->{close} < $lo->{price}) {
+                my $key = join('|', $scope, 'low', $lo->{id});
+                if (!$broken{$key}) {
+                    $broken{$key} = 1;
+                    my $type = ($ctx{$scope}{trend} eq 'bullish') ? 'CHOCH' : 'BOS';
+                    push @out, _structure_event(
+                        $type, 'bearish', $tf, $lo, $i, $c, $scope, $liq_evts,
+                    );
+                    $ctx{$scope}{trend} = 'bearish';
+                }
+            }
         }
     }
 
     return \@out;
+}
+
+sub _structure_event {
+    my ($type, $direction, $tf, $pivot, $i, $c, $scope, $liq_evts) = @_;
+    my $quality = _quality($c, $liq_evts, $i);
+    return {
+        id             => _new_id(),
+        type           => $type,
+        direction      => $direction,
+        timeframe      => $tf,
+        pivot_id       => $pivot->{id},
+        break_index    => $i,
+        break_time     => $c->{time},
+        break_price    => $pivot->{price},
+        close_price    => $c->{close},
+        confirmed      => 1,
+        break_mode     => 'close',
+        scope          => $scope,
+        real_or_false  => $scope eq 'external' || $quality >= 0.65 ? 'real' : 'internal',
+        quality_score  => $quality,
+        liquidity_context => _near_liq($liq_evts, $i),
+    };
 }
 
 sub _quality {
@@ -386,34 +375,71 @@ sub _build_fib_sets {
     my @ext = grep { ($_->{scope}//'') eq 'external' } @$structures;
     return [] unless @ext;
 
-    my $last_s = $ext[-1];
     my @highs  = grep { $_->{kind} eq 'high' && $_->{confirmed_at} <= $max_idx } @$pivots;
     my @lows   = grep { $_->{kind} eq 'low'  && $_->{confirmed_at} <= $max_idx } @$pivots;
     return [] unless @highs && @lows;
 
-    my $ah = $highs[-1];
-    my $al = $lows[-1];
-    my $range = $ah->{price} - $al->{price};
-    return [] if $range <= 0;
+    my %pivot_by_id = map { $_->{id} => $_ } @$pivots;
+    my @sets;
 
-    my @levels = map { {
-        ratio => $_,
-        price => $al->{price} + $range * (1 - $_),
-    } } @{ FIB_RATIOS() };
+    for my $st (@ext) {
+        next if ($st->{break_index} // 9_999_999) > $max_idx;
 
-    return [{
-        id                 => _new_id(),
-        timeframe          => $tf,
-        anchor_start_index => $al->{index},
-        anchor_end_index   => $ah->{index},
-        anchor_start_time  => $al->{time},
-        anchor_end_time    => $ah->{time},
-        anchor_high        => $ah->{price},
-        anchor_low         => $al->{price},
-        source_event_id    => $last_s->{id},
-        direction          => $last_s->{direction},
-        levels             => \@levels,
-    }];
+        my ($a, $b);
+        if (($st->{direction} // '') eq 'bullish') {
+            $b = $pivot_by_id{ $st->{pivot_id} } // _last_before(\@highs, $st->{break_index});
+            $a = _last_before(\@lows, defined $b ? $b->{index} : $st->{break_index});
+            next unless $a && $b && $b->{price} > $a->{price};
+        }
+        else {
+            $b = $pivot_by_id{ $st->{pivot_id} } // _last_before(\@lows, $st->{break_index});
+            $a = _last_before(\@highs, defined $b ? $b->{index} : $st->{break_index});
+            next unless $a && $b && $a->{price} > $b->{price};
+        }
+
+        my $high = $a->{price} > $b->{price} ? $a->{price} : $b->{price};
+        my $low  = $a->{price} < $b->{price} ? $a->{price} : $b->{price};
+        my $range = $high - $low;
+        next if $range <= 0;
+
+        my @levels = map {
+            my $price = ($st->{direction} // '') eq 'bullish'
+                ? $high - $range * $_
+                : $low  + $range * $_;
+            {
+                ratio => $_,
+                price => $price,
+            }
+        } @{ FIB_RATIOS() };
+
+        push @sets, {
+            id                 => _new_id(),
+            timeframe          => $tf,
+            anchor_start_index => $a->{index},
+            anchor_end_index   => $b->{index},
+            anchor_start_time  => $a->{time},
+            anchor_end_time    => $b->{time},
+            anchor_high        => $high,
+            anchor_low         => $low,
+            source_event_id    => $st->{id},
+            direction          => $st->{direction},
+            break_index        => $st->{break_index},
+            break_time         => $st->{break_time},
+            levels             => \@levels,
+        };
+    }
+
+    return \@sets;
+}
+
+sub _last_before {
+    my ($arr, $idx) = @_;
+    my $last;
+    for my $p (@$arr) {
+        last if ($p->{index} // 9_999_999) > $idx;
+        $last = $p;
+    }
+    return $last;
 }
 
 1;

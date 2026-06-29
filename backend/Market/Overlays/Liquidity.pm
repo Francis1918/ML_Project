@@ -134,6 +134,25 @@ sub build_shapes {
         }
         else { next }
 
+        if (defined $ev->{swept_candle_high} && defined $ev->{swept_candle_low}) {
+            push @shapes, {
+                id          => "EV_CANDLE_$sid",
+                source_type => 'liquidity',
+                source_id   => $ev->{id},
+                kind        => 'rectangle',
+                timeframe   => $ev->{timeframe},
+                x1_index    => $ev->{swept_index},
+                x2_index    => $ev->{swept_index},
+                y1_price    => $ev->{swept_candle_low},
+                y2_price    => $ev->{swept_candle_high},
+                text        => undef,
+                color_role  => $role,
+                line_style  => 'solid',
+                opacity     => $class eq 'RUN' ? 0.24 : 0.18,
+                visible_by_default => 1,
+            };
+        }
+
         push @shapes, {
             id          => "EV_$sid",
             source_type => 'liquidity',

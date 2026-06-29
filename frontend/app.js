@@ -69,8 +69,10 @@ function _syncOverlayControlStates() {
 
   const smcAllItem = controls.querySelector('[data-layer-toggle="smc_all"]');
   const liqAllItem = controls.querySelector('[data-layer-toggle="liq_all"]');
+  const strategyAllItem = controls.querySelector('[data-layer-toggle="strategy_all"]');
   const smcAll = smcAllItem ? _layerItemIsChecked(smcAllItem) : true;
   const liqAll = liqAllItem ? _layerItemIsChecked(liqAllItem) : true;
+  const strategyAll = strategyAllItem ? _layerItemIsChecked(strategyAllItem) : true;
 
   controls.querySelectorAll('[data-layer-parent="smc_all"]').forEach(item => {
     item.classList.toggle('is-muted', !smcAll);
@@ -80,6 +82,11 @@ function _syncOverlayControlStates() {
   controls.querySelectorAll('[data-layer-parent="liq_all"]').forEach(item => {
     item.classList.toggle('is-muted', !liqAll);
     item.setAttribute('aria-disabled', liqAll ? 'false' : 'true');
+  });
+
+  controls.querySelectorAll('[data-layer-parent="strategy_all"]').forEach(item => {
+    item.classList.toggle('is-muted', !strategyAll);
+    item.setAttribute('aria-disabled', strategyAll ? 'false' : 'true');
   });
 }
 
