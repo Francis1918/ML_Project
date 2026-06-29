@@ -22,6 +22,7 @@ let _fetchController = null;
 let _overlayController = null;
 let _rangeController = null;
 let _overlayDebounce = null;
+let _candleViewDebounce = null;
 
 // Replay
 const Replay = {
@@ -40,6 +41,7 @@ const WINDOW_LIMIT = 500;
 const EDGE_LOAD_THRESHOLD = 80;
 const OVERLAY_DEBOUNCE_MS = 140;
 const OVERLAY_VIEW_PADDING = 250;
+const CANDLE_VIEW_PADDING = 200;
 
 
 // Estado del menu multi-select de overlays. Vive en el frontend:
@@ -307,6 +309,8 @@ async function loadTimeframe(tf) {
     _fetchController.abort();
     _fetchController = null;
   }
+  clearTimeout(_candleViewDebounce);
+  _candleViewDebounce = null;
   _fetchController = new AbortController();
   const signal = _fetchController.signal;
 
@@ -397,6 +401,74 @@ function _scheduleVisibleOverlayLoad(range) {
   }, OVERLAY_DEBOUNCE_MS);
 }
 
+// Análogo a _scheduleVisibleOverlayLoad pero para velas+ATR.
+// Verifica que la ventana visible + CANDLE_VIEW_PADDING esté cubierta
+// por el buffer; si no, solicita los rangos faltantes.
+function _scheduleVisibleCandleLoad(range) {
+  if (Replay.active || !range) return;
+  clearTimeout(_candleViewDebounce);
+  _candleViewDebounce = setTimeout(() => {
+    const latest = _currentVisibleAbsRange();
+    if (!latest || Replay.active || !App.data) return;
+    const total    = App.data.total ?? 0;
+    const maxAbs   = total > 0 ? total - 1 : latest.absLast;
+    const reqStart = Math.max(0, latest.absFirst - CANDLE_VIEW_PADDING);
+    const reqEnd   = Math.min(maxAbs, latest.absLast + CANDLE_VIEW_PADDING);
+    const entry    = _tfCache(App.timeframe);
+    const covered  = entry.loadedStart !== null && entry.loadedEnd !== null &&
+                     entry.loadedStart <= reqStart && entry.loadedEnd >= reqEnd;
+    if (!covered) _loadCandleWindow(App.timeframe, reqStart, reqEnd);
+  }, OVERLAY_DEBOUNCE_MS);
+}
+
+// Carga los rangos izquierdo y/o derecho que falten para cubrir [startAbs, endAbs].
+// Usa _rangeController como mutex compartido con _maybeLoadMoreCandles,
+// por lo que ambos no pueden ejecutarse en paralelo.
+async function _loadCandleWindow(tf, startAbs, endAbs) {
+  if (_rangeController || Replay.active) return;
+  const entry = _tfCache(tf);
+  const gaps  = [];
+
+  if (entry.loadedStart === null) {
+    gaps.push({ start: startAbs, end: Math.min(endAbs, startAbs + WINDOW_LIMIT - 1) });
+  } else {
+    if (startAbs < entry.loadedStart) {
+      const end   = entry.loadedStart - 1;
+      const start = Math.max(startAbs, end - WINDOW_LIMIT + 1);
+      if (start <= end) gaps.push({ start, end });
+    }
+    if (endAbs > entry.loadedEnd) {
+      const total  = App.data?.total ?? 0;
+      const maxAbs = total > 0 ? total - 1 : endAbs;
+      const start  = entry.loadedEnd + 1;
+      const end    = Math.min(Math.min(endAbs, maxAbs), start + WINDOW_LIMIT - 1);
+      if (start <= end) gaps.push({ start, end });
+    }
+  }
+
+  if (!gaps.length) return;
+
+  _rangeController = new AbortController();
+  const signal = _rangeController.signal;
+  try {
+    for (const gap of gaps) {
+      if (signal.aborted || Replay.active || App.timeframe !== tf) break;
+      const chunk  = await fetchData(tf, { start: gap.start, end: gap.end }, signal);
+      if (signal.aborted || Replay.active || App.timeframe !== tf) break;
+      const merged = _mergeCandleData(entry, chunk);
+      App.data = merged.data;
+      App.engine.set_market(App.data);
+      if (merged.addedRight > 0) App.engine.offset += merged.addedRight;
+      App.engine.request_render();
+      _scheduleVisibleOverlayLoad(_currentVisibleAbsRange());
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') console.error('Error en carga dinámica de velas:', err);
+  } finally {
+    _rangeController = null;
+  }
+}
+
 async function _maybeLoadMoreCandles(range) {
   if (Replay.active || _rangeController || !App.data || !range) return;
 
@@ -438,6 +510,7 @@ async function _maybeLoadMoreCandles(range) {
 
     App.engine.request_render();
     _scheduleVisibleOverlayLoad(_currentVisibleAbsRange());
+    _scheduleVisibleCandleLoad(_currentVisibleAbsRange());
   } catch (err) {
     if (err.name !== 'AbortError') console.error('Error cargando rango:', err);
   } finally {
@@ -453,6 +526,7 @@ function handleViewChange(range) {
     App.engine?.request_render();
   }
   _maybeLoadMoreCandles(range);
+  _scheduleVisibleCandleLoad(range);
   _scheduleVisibleOverlayLoad(range);
 }
 
