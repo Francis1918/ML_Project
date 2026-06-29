@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Trading Chart</title>
-  <link rel="stylesheet" href="styles.css?v=17" />
+  <link rel="stylesheet" href="styles.css?v=18" />
 </head>
 <body>
   <div id="app">
@@ -121,6 +121,11 @@
       </div>
 
       <span class="spacer"></span>
+      <div class="tool-group">
+        <button id="btn-fib" class="tool-btn" title="Fibonacci manual">Fib</button>
+        <button id="btn-fib-undo" class="tool-btn compact" title="Deshacer Fibonacci">Undo</button>
+        <button id="btn-fib-clear" class="tool-btn compact" title="Borrar Fibonacci">Clear</button>
+      </div>
       <div class="mode-group">
         <button id="btn-auto"   class="mode-btn active">Auto</button>
         <button id="btn-manual" class="mode-btn">Manual</button>
@@ -154,7 +159,7 @@
   <script src="scales.js?v=16"></script>
   <script src="price_panel.js?v=16"></script>
   <script src="atr_panel.js?v=16"></script>
-  <script src="chart_engine.js?v=17"></script>
-  <script src="app.js?v=18"></script>
+  <script src="chart_engine.js?v=20"></script>
+  <script src="app.js?v=21"></script>
 </body>
 </html>

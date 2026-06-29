@@ -289,8 +289,12 @@ sub _build_window_overlay_for {
         timeframe         => $tf,
     );
 
-    my $liq_shapes = _clip_shapes_window($liq_shapes_all, $vis_start_local, $vis_end_local);
-    my $smc_shapes = _clip_shapes_window($smc_shapes_all, $vis_start_local, $vis_end_local);
+    my $liq_shapes = _clip_shapes_window(
+        $liq_shapes_all, $vis_start_local, $vis_end_local, $calc_start, $cache->{candles},
+    );
+    my $smc_shapes = _clip_shapes_window(
+        $smc_shapes_all, $vis_start_local, $vis_end_local, $calc_start, $cache->{candles},
+    );
     my $cur_regime = ($regime_states && @$regime_states && $vis_end_local < scalar @$regime_states)
                      ? $regime_states->[$vis_end_local]
                      : { state => 'UNKNOWN', reason => 'fuera de rango', replay_safe => 1 };
@@ -302,6 +306,8 @@ sub _build_window_overlay_for {
         stats         => {
             calc_start => $calc_start,
             calc_end   => $calc_end,
+            win_start  => $win_start,
+            win_end    => $win_end,
             candles    => scalar @candles,
             elapsed_s  => sprintf('%.3f', tv_interval($t0)),
         },
@@ -325,7 +331,8 @@ sub _build_window_overlay_for {
 # Filtra shapes que intersectan [win_start, max_abs_idx] y
 # normaliza x1_index/x2_index restando win_start.
 sub _clip_shapes_window {
-    my ($shapes, $win_start, $max_abs_idx) = @_;
+    my ($shapes, $win_start, $max_abs_idx, $abs_offset, $abs_candles) = @_;
+    $abs_offset //= 0;
     my @result;
     for my $sh (@$shapes) {
         my $x1 = $sh->{x1_index} // 0;
@@ -333,8 +340,17 @@ sub _clip_shapes_window {
         next if $x1 > $max_abs_idx;
         next if $x2 < $win_start;
         my %s    = %$sh;
+        my $clipped_x2 = $x2 > $max_abs_idx ? $max_abs_idx : $x2;
+        my $abs_x1 = $x1 + $abs_offset;
+        my $abs_x2 = $clipped_x2 + $abs_offset;
         $s{x1_index} = $x1 - $win_start;
-        $s{x2_index} = ($x2 > $max_abs_idx ? $max_abs_idx : $x2) - $win_start;
+        $s{x2_index} = $clipped_x2 - $win_start;
+        $s{x1_abs_index} = $abs_x1;
+        $s{x2_abs_index} = $abs_x2;
+        $s{x1_time} = $abs_candles->[$abs_x1]{time}
+            if $abs_candles && $abs_x1 >= 0 && $abs_x1 <= $#$abs_candles;
+        $s{x2_time} = $abs_candles->[$abs_x2]{time}
+            if $abs_candles && $abs_x2 >= 0 && $abs_x2 <= $#$abs_candles;
         push @result, \%s;
     }
     return \@result;
@@ -530,10 +546,10 @@ sub _htf_level {
 }
 
 sub _build_htf_liquidity_shapes_for {
-    my ($tf, $win_end, $local_max) = @_;
+    my ($tf, $win_start, $win_end, $local_max) = @_;
     return [] unless exists $HTF_SOURCES{$tf};
 
-    my $cache_key = join(':', $tf, $win_end, $local_max);
+    my $cache_key = join(':', $tf, $win_start, $win_end, $local_max);
     return $HTF_LIQUIDITY_SHAPE_CACHE{$cache_key}
         if exists $HTF_LIQUIDITY_SHAPE_CACHE{$cache_key};
 
@@ -542,6 +558,7 @@ sub _build_htf_liquidity_shapes_for {
     return [] unless $base_cache && $base_cache->{candles} && @{ $base_cache->{candles} };
 
     my $visible_end = $base_cache->{candles}[$win_end]{time};
+    my $visible_start = $base_cache->{candles}[$win_start]{time};
     my $cutoff_time = _add_minutes_iso($visible_end, _tf_minutes($tf));
     my @out;
 
@@ -570,6 +587,10 @@ sub _build_htf_liquidity_shapes_for {
                 internal_or_external => 'external',
                 x1_index             => 0,
                 x2_index             => $local_max,
+                x1_abs_index         => $win_start,
+                x2_abs_index         => $win_end,
+                x1_time              => $visible_start,
+                x2_time              => $visible_end,
                 y1_price             => $lv->{price},
                 y2_price             => $lv->{price},
                 color_role           => $role,
@@ -587,6 +608,10 @@ sub _build_htf_liquidity_shapes_for {
                 internal_or_external => 'external',
                 x1_index             => $local_max,
                 x2_index             => $local_max,
+                x1_abs_index         => $win_end,
+                x2_abs_index         => $win_end,
+                x1_time              => $visible_end,
+                x2_time              => $visible_end,
                 y1_price             => $lv->{price},
                 y2_price             => $lv->{price},
                 text                 => uc($lv->{type}) . " $htf",
@@ -717,7 +742,12 @@ get '/api/candles' => sub {
     my ($win_start, $win_end, $max_abs, $is_replay) =
         _resolve_window($cache, $replay_index, $start_p, $end_p, $limit);
 
-    my @candles_slice = @{ $cache->{candles} }[$win_start .. $win_end];
+    my @candles_slice;
+    for my $abs_i ($win_start .. $win_end) {
+        my %candle = %{ $cache->{candles}[$abs_i] };
+        $candle{abs_index} = $abs_i;
+        push @candles_slice, \%candle;
+    }
     my @atr_slice     = @{ $cache->{atr}     }[$win_start .. $win_end];
     my $local_max     = $win_end - $win_start;
     my $total         = scalar @{ $cache->{candles} };
@@ -728,6 +758,7 @@ get '/api/candles' => sub {
         atr               => \@atr_slice,
         total             => $total,
         win_start         => $win_start,
+        win_end           => $win_end,
         first_index       => 0,
         last_index        => $local_max,
         has_more_left     => $win_start > 0       ? \1 : \0,
@@ -776,7 +807,7 @@ get '/api/overlays' => sub {
         my $mr = $fast->{market_regime};
         my $liquidity = { %{ $fast->{liquidity} } };
         my $smc       = { %{ $fast->{smc} } };
-        my $htf_shapes = _build_htf_liquidity_shapes_for($tf, $win_end, $local_max);
+        my $htf_shapes = _build_htf_liquidity_shapes_for($tf, $win_start, $win_end, $local_max);
         $liquidity->{overlay_shapes} = [ @{ $liquidity->{overlay_shapes} // [] }, @$htf_shapes ];
         if ($absolute) {
             $liquidity->{overlay_shapes} =
@@ -788,6 +819,8 @@ get '/api/overlays' => sub {
             timeframe         => $tf,
             visible_range     => { start => 0, end => $local_max },
             win_start         => $win_start,
+            win_end           => $win_end,
+            visible_abs_range => { start => $win_start, end => $win_end },
             max_visible_index => $local_max,
             partial           => \1,
             lookback          => $OVERLAY_LOOKBACK,
@@ -843,8 +876,8 @@ get '/api/overlays' => sub {
     }
 
     # Shapes: filtrar al rango [win_start, win_end] y normalizar a 0-based.
-    my $liq_shapes = _clip_shapes_window($cache->{liq_shapes}, $win_start, $win_end);
-    my $smc_shapes = _clip_shapes_window($cache->{smc_shapes}, $win_start, $win_end);
+    my $liq_shapes = _clip_shapes_window($cache->{liq_shapes}, $win_start, $win_end, 0, $cache->{candles});
+    my $smc_shapes = _clip_shapes_window($cache->{smc_shapes}, $win_start, $win_end, 0, $cache->{candles});
     if ($absolute) {
         $liq_shapes = _shift_shape_indices($liq_shapes, $win_start);
         $smc_shapes = _shift_shape_indices($smc_shapes, $win_start);
@@ -853,7 +886,7 @@ get '/api/overlays' => sub {
     # HTF: niveles activos de temporalidades superiores.
     # Se calculan tambien en la ruta normal, no solo debug/full, y se
     # recortan al ultimo HTF cerrado para evitar fuga de velas futuras.
-    my $htf_shapes = _build_htf_liquidity_shapes_for($tf, $win_end, $local_max);
+    my $htf_shapes = _build_htf_liquidity_shapes_for($tf, $win_start, $win_end, $local_max);
 
     my $liquidity = {
         overlay_shapes => [@$liq_shapes, @$htf_shapes],
@@ -874,6 +907,8 @@ get '/api/overlays' => sub {
         timeframe         => $tf,
         visible_range     => { start => 0, end => $local_max },
         win_start         => $win_start,
+        win_end           => $win_end,
+        visible_abs_range => { start => $win_start, end => $win_end },
         max_visible_index => $local_max,
         replay            => {
             active => $is_replay ? \1 : \0,

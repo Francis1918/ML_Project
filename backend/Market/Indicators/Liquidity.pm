@@ -178,7 +178,9 @@ sub _find_swing_points {
                 kind              => 'high',
                 index             => $i,
                 price             => $candles->[$i]{high},
+                time              => $candles->[$i]{time},
                 confirmed_at      => $i + $k,
+                confirmed_time    => $candles->[$i + $k]{time},
                 broke_structure   => 0,
                 strength          => 'unknown',
             };
@@ -197,7 +199,9 @@ sub _find_swing_points {
                 kind              => 'low',
                 index             => $i,
                 price             => $candles->[$i]{low},
+                time              => $candles->[$i]{time},
                 confirmed_at      => $i + $k,
+                confirmed_time    => $candles->[$i + $k]{time},
                 broke_structure   => 0,
                 strength          => 'unknown',
             };
@@ -227,7 +231,10 @@ sub _create_levels_from_swings {
             timeframe          => $timeframe,
             price              => $sh->{price},
             start_index        => $sh->{confirmed_at},
+            start_time         => $sh->{confirmed_time},
+            pivot_time         => $sh->{time},
             end_index          => undef,
+            end_time           => undef,
             pivots             => [$sh],
             tolerance          => $atr * EQ_FACTOR,
             state              => 'DETECTED',
@@ -250,7 +257,10 @@ sub _create_levels_from_swings {
             timeframe          => $timeframe,
             price              => $sl->{price},
             start_index        => $sl->{confirmed_at},
+            start_time         => $sl->{confirmed_time},
+            pivot_time         => $sl->{time},
             end_index          => undef,
+            end_time           => undef,
             pivots             => [$sl],
             tolerance          => $atr * EQ_FACTOR,
             state              => 'DETECTED',
@@ -301,7 +311,10 @@ sub _create_equal_levels {
             timeframe          => $timeframe,
             price              => $price,
             start_index        => $cur->{confirmed_at},
+            start_time         => $cur->{confirmed_time},
+            pivot_time         => $cur->{time},
             end_index          => undef,
+            end_time           => undef,
             pivots             => [$best, $cur],
             tolerance          => $tol,
             state              => 'DETECTED',
@@ -369,6 +382,7 @@ sub _advance_state_list {
                     $lv->{state}     = 'RESOLVED';
                     $lv->{active}    = 0;
                     $lv->{end_index} = $idx;
+                    $lv->{end_time}  = $candle->{time};
                     $self->_emit_event($lv, 'RUN', $idx, $candle);
                 }
             }
@@ -386,6 +400,7 @@ sub _advance_state_list {
             $lv->{state}     = 'RESOLVED';
             $lv->{active}    = 0;
             $lv->{end_index} = $idx;
+            $lv->{end_time}  = $candle->{time};
             $self->_emit_event($lv, $classification, $idx, $candle);
         }
     }
@@ -404,6 +419,9 @@ sub _emit_event {
     # Volume weight del sweep: candle donde ocurrio el barrido
     my $sweep_idx = $sc->{swept_index} // $resolved_idx;
     my $sweep_vw  = _vol_weight($self, $self->{_candles}, $sweep_idx);
+    my $sweep_time = (defined $sweep_idx && $self->{_candles} && $sweep_idx <= $#{ $self->{_candles} })
+        ? $self->{_candles}[$sweep_idx]{time}
+        : undef;
 
     push @{ $self->{events} }, {
         id                 => _new_id(),
@@ -411,6 +429,7 @@ sub _emit_event {
         timeframe          => $lv->{timeframe},
         direction          => ($lv->{type} eq 'BSL' || $lv->{type} eq 'EQH') ? 'up' : 'down',
         swept_index        => $sc->{swept_index},
+        swept_time         => $sweep_time,
         swept_price        => $sc->{swept_price},
         close_price        => $sc->{close_price},
         state_path         => ['DETECTED', 'SWEPT',
@@ -418,6 +437,7 @@ sub _emit_event {
                                'RESOLVED'],
         classification     => $classification,
         resolved_index     => $resolved_idx,
+        resolved_time      => $candle->{time},
         confirmation_bars  => ($resolved_idx - ($sc->{swept_index} // $resolved_idx)),
         related_fvg_ids    => [],
         projected_effect   => $effect,
@@ -746,7 +766,9 @@ sub _detect_swing_points {
             kind         => 'high',
             index        => $pivot_idx,
             price        => $c->{high},
+            time         => $c->{time},
             confirmed_at => $idx,
+            confirmed_time => $market->get_candle($idx)->{time},
         };
         push @{ $self->{levels} }, {
             id                   => _new_id(),
@@ -755,7 +777,10 @@ sub _detect_swing_points {
             timeframe            => $timeframe,
             price                => $c->{high},
             start_index          => $idx,
+            start_time           => $market->get_candle($idx)->{time},
+            pivot_time           => $c->{time},
             end_index            => undef,
+            end_time             => undef,
             tolerance            => ($atr // 0) * EQ_FACTOR,
             state                => 'DETECTED',
             active               => 1,
@@ -780,7 +805,9 @@ sub _detect_swing_points {
             kind         => 'low',
             index        => $pivot_idx,
             price        => $c->{low},
+            time         => $c->{time},
             confirmed_at => $idx,
+            confirmed_time => $market->get_candle($idx)->{time},
         };
         push @{ $self->{levels} }, {
             id                   => _new_id(),
@@ -789,7 +816,10 @@ sub _detect_swing_points {
             timeframe            => $timeframe,
             price                => $c->{low},
             start_index          => $idx,
+            start_time           => $market->get_candle($idx)->{time},
+            pivot_time           => $c->{time},
             end_index            => undef,
+            end_time             => undef,
             tolerance            => ($atr // 0) * EQ_FACTOR,
             state                => 'DETECTED',
             active               => 1,

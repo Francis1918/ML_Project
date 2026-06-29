@@ -81,6 +81,8 @@ const PRICE_AXIS_W = 60;
 const TIME_AXIS_H  = 20;
 const MIN_BARS = 2;
 const MAX_BARS = 8000;
+const MAX_HTF_LABELS = 10;
+const MANUAL_FIB_LEVELS = Object.freeze([0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]);
 
 class ChartEngine {
   constructor(market, els) {
@@ -108,13 +110,63 @@ class ChartEngine {
     this.mode = "auto";
     this.overlays = null;
     this.overlay_visibility = { ...DEFAULT_OVERLAY_VISIBILITY };
+    this._onViewChange = null;
+    this._lastViewSignature = "";
+    this._absToLocal = new Map();
+    this._timeToLocal = new Map();
+    this.active_tool = "cursor";
+    this.manual_fibs = [];
+    this._fibAnchor = null;
+    this._fibHoverAnchor = null;
+    this._build_index_maps();
+    this._apply_tool_cursor();
   }
 
   set_overlays(ov) { this.overlays = ov; }
 
+  set_view_change_handler(fn) {
+    this._onViewChange = typeof fn === "function" ? fn : null;
+  }
+
   set_overlay_visibility(visibility = {}) {
     this.overlay_visibility = { ...DEFAULT_OVERLAY_VISIBILITY, ...visibility };
     this.request_render();
+  }
+
+  set_tool(tool) {
+    this.active_tool = tool === "fib" ? "fib" : "cursor";
+    if (this.active_tool !== "fib") {
+      this._fibAnchor = null;
+      this._fibHoverAnchor = null;
+    }
+    this._apply_tool_cursor();
+    this.request_render();
+  }
+
+  get_tool() { return this.active_tool; }
+
+  clear_manual_fibs() {
+    const tf = this.market?.timeframe;
+    this.manual_fibs = this.manual_fibs.filter(f => f.timeframe !== tf);
+    this._fibAnchor = null;
+    this._fibHoverAnchor = null;
+    this.request_render();
+  }
+
+  undo_manual_fib() {
+    const tf = this.market?.timeframe;
+    for (let i = this.manual_fibs.length - 1; i >= 0; i--) {
+      if (this.manual_fibs[i].timeframe === tf) {
+        this.manual_fibs.splice(i, 1);
+        break;
+      }
+    }
+    this.request_render();
+  }
+
+  _apply_tool_cursor() {
+    if (!this.els?.priceCanvas) return;
+    this.els.priceCanvas.style.cursor = this.active_tool === "fib" ? "copy" : "crosshair";
   }
 
   set_mode(mode) {
@@ -127,7 +179,26 @@ class ChartEngine {
     this.request_render();
   }
 
-  set_market(market) { this.market = market; }
+  set_market(market) {
+    this.market = market;
+    this._build_index_maps();
+    this._clamp_bars();
+    this._clamp_offset();
+    this._lastViewSignature = "";
+  }
+
+  _build_index_maps() {
+    this._absToLocal = new Map();
+    this._timeToLocal = new Map();
+    if (!this.market?.candles) return;
+    const base = this.market.win_start ?? 0;
+    for (let i = 0; i < this.market.candles.length; i++) {
+      const c = this.market.candles[i];
+      const abs = c.abs_index ?? (base + i);
+      this._absToLocal.set(abs, i);
+      if (c.time) this._timeToLocal.set(c.time, i);
+    }
+  }
 
   round(v) { return Math.round(v); }
 
@@ -145,6 +216,39 @@ class ChartEngine {
     const first = Math.max(0, Math.min(n - 1, Math.floor(virtualFirst)));
     const last  = Math.max(0, Math.min(n - 1, Math.ceil(virtualLast)));
     return { first, last, virtualFirst, count };
+  }
+
+  get_visible_abs_range(win = null) {
+    if (!this.market?.candles?.length) return null;
+    win = win ?? this.compute_window();
+    const firstC = this.market.candles[win.first];
+    const lastC  = this.market.candles[win.last];
+    const base = this.market.win_start ?? 0;
+    return {
+      first: win.first,
+      last: win.last,
+      count: win.count,
+      absFirst: firstC?.abs_index ?? (base + win.first),
+      absLast: lastC?.abs_index ?? (base + win.last),
+      loadedStart: this.market.win_start ?? 0,
+      loadedEnd: this.market.win_end ?? (base + this.market.candles.length - 1),
+      total: this.market.total ?? this.market.candles.length,
+      hasMoreLeft: !!this.market.has_more_left,
+      hasMoreRight: !!this.market.has_more_right,
+    };
+  }
+
+  _notify_view_change(win) {
+    if (!this._onViewChange) return;
+    const range = this.get_visible_abs_range(win);
+    if (!range) return;
+    const sig = [
+      range.absFirst, range.absLast, range.loadedStart,
+      range.loadedEnd, this.visible_bars, this.offset,
+    ].join(":");
+    if (sig === this._lastViewSignature) return;
+    this._lastViewSignature = sig;
+    this._onViewChange(range);
   }
 
   _clamp_offset() {
@@ -213,6 +317,7 @@ class ChartEngine {
 
     this.pricePanel.render(candles, win.first);
     this._draw_overlays(this.els.priceCanvas.getContext("2d"), win);
+    this._draw_manual_fibs(this.els.priceCanvas.getContext("2d"), win);
 
     const lastC = this.market.candles[this.market.candles.length - 1];
     if (lastC) this.pricePanel.draw_last_price(lastC.close, lastC.open);
@@ -260,6 +365,7 @@ class ChartEngine {
     if (dt > 20) {
       console.debug(`[render] ${dt.toFixed(1)}ms | bars=${win.count} barW=${barW.toFixed(2)}`);
     }
+    this._notify_view_change(win);
   }
 
   // ============================================================
@@ -365,6 +471,51 @@ class ChartEngine {
     }
   }
 
+  _anchor_from_mouse_event(e) {
+    if (!this.market?.candles?.length) return null;
+    const rect = this.els.priceCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    let idx = Math.round(this.priceScale.x_to_index_float(x) - 0.5);
+    if (idx < 0) idx = 0;
+    if (idx >= this.market.candles.length) idx = this.market.candles.length - 1;
+    const candle = this.market.candles[idx];
+    const absIndex = candle?.abs_index ?? ((this.market.win_start ?? 0) + idx);
+    return {
+      index: idx,
+      abs_index: absIndex,
+      time: candle?.time,
+      price: this.priceScale.y_to_value(y),
+    };
+  }
+
+  _handle_fib_click(e) {
+    const anchor = this._anchor_from_mouse_event(e);
+    if (!anchor) return;
+
+    if (!this._fibAnchor) {
+      this._fibAnchor = anchor;
+      this._fibHoverAnchor = anchor;
+      this.request_render();
+      return;
+    }
+
+    if (this._fibAnchor.abs_index === anchor.abs_index &&
+        Math.abs(this._fibAnchor.price - anchor.price) < 1e-9) {
+      return;
+    }
+
+    this.manual_fibs.push({
+      id: `MFIB_${Date.now()}_${this.manual_fibs.length}`,
+      timeframe: this.market.timeframe,
+      a: this._fibAnchor,
+      b: anchor,
+    });
+    this._fibAnchor = null;
+    this._fibHoverAnchor = null;
+    this.request_render();
+  }
+
   bind_events() {
     const btnAuto   = document.getElementById("btn-auto");
     const btnManual = document.getElementById("btn-manual");
@@ -392,6 +543,11 @@ class ChartEngine {
   }
 
   _on_mouse_down(e, panel) {
+    if (panel === "price" && this.active_tool === "fib" && e.button === 0) {
+      e.preventDefault();
+      this._handle_fib_click(e);
+      return;
+    }
     if (e.button === 0) {
       this._dragX = true; this._startX = e.clientX; this._startOff = this.offset;
       if (this.mode === "manual") {
@@ -418,6 +574,12 @@ class ChartEngine {
     const panel = (cv === this.els.priceCanvas) ? "price" : "atr";
     this._mouse      = { x: e.clientX - rect.left, y: e.clientY - rect.top, panel };
     this._hoverIndex = this.priceScale.x_to_index(this._mouse.x);
+
+    if (panel === "price" && this.active_tool === "fib" && this._fibAnchor) {
+      this._fibHoverAnchor = this._anchor_from_mouse_event(e);
+      this.request_render();
+      return;
+    }
 
     if (this._has_crosshair_layers()) {
       this._draw_crosshair_only();
@@ -722,6 +884,32 @@ class ChartEngine {
     return true;
   }
 
+  _shape_index_from_anchor(sh, absKey, timeKey, localKey) {
+    const rawAbs = sh[absKey];
+    if (rawAbs !== undefined && rawAbs !== null && rawAbs !== '') {
+      const abs = Number(rawAbs);
+      if (Number.isFinite(abs)) {
+        if (this._absToLocal.has(abs)) return this._absToLocal.get(abs);
+        return abs - (this.market?.win_start ?? 0);
+      }
+    }
+
+    const time = sh[timeKey];
+    if (time && this._timeToLocal.has(time)) return this._timeToLocal.get(time);
+
+    return sh[localKey] ?? 0;
+  }
+
+  _shape_with_local_indices(sh) {
+    const x1 = this._shape_index_from_anchor(sh, 'x1_abs_index', 'x1_time', 'x1_index');
+    const x2 = this._shape_index_from_anchor(sh, 'x2_abs_index', 'x2_time', 'x2_index');
+    return {
+      ...sh,
+      x1_index: x1,
+      x2_index: x2 ?? x1,
+    };
+  }
+
   // ============================================================
   //  Overlays (shapes de Liquidity + SMC)
   // ============================================================
@@ -735,15 +923,23 @@ class ChartEngine {
     const rects  = [];
     const lines  = [];
     const labels = [];
+    let htfLabelCount = 0;
 
     for (const sh of [...lshapes, ...sshapes]) {
       if (!sh.visible_by_default) continue;
       if (!this._is_overlay_shape_visible(sh)) continue;
-      if ((sh.x2_index ?? sh.x1_index) < win.first) continue;
-      if (sh.x1_index > win.last) continue;
-      if      (sh.kind === 'rectangle')                rects.push(sh);
-      else if (sh.kind === 'line' || sh.kind === 'fib_line') lines.push(sh);
-      else                                             labels.push(sh);
+      const localShape = this._shape_with_local_indices(sh);
+      if ((localShape.x2_index ?? localShape.x1_index) < win.first) continue;
+      if (localShape.x1_index > win.last) continue;
+      if      (localShape.kind === 'rectangle')                rects.push(localShape);
+      else if (localShape.kind === 'line' || localShape.kind === 'fib_line') lines.push(localShape);
+      else {
+        if (localShape.htf_source) {
+          if (htfLabelCount >= MAX_HTF_LABELS) continue;
+          htfLabelCount++;
+        }
+        labels.push(localShape);
+      }
     }
 
     for (const sh of rects)  this._ov_rect(ctx, s, sh, win);
@@ -856,6 +1052,106 @@ class ChartEngine {
     ctx.textBaseline = 'bottom';
     ctx.textAlign    = 'center';
     ctx.fillText(text, px, py - 3);
+    ctx.restore();
+  }
+
+  _manual_anchor_to_local(anchor) {
+    if (!anchor) return null;
+    if (this._absToLocal.has(anchor.abs_index)) {
+      return { ...anchor, index: this._absToLocal.get(anchor.abs_index) };
+    }
+    return {
+      ...anchor,
+      index: anchor.abs_index - (this.market?.win_start ?? 0),
+    };
+  }
+
+  _draw_manual_fibs(ctx, win) {
+    const tf = this.market?.timeframe;
+    if (!tf) return;
+
+    for (const fib of this.manual_fibs) {
+      if (fib.timeframe !== tf) continue;
+      this._draw_manual_fib(ctx, win, fib, false);
+    }
+
+    if (this._fibAnchor && this._fibHoverAnchor) {
+      this._draw_manual_fib(ctx, win, {
+        timeframe: tf,
+        a: this._fibAnchor,
+        b: this._fibHoverAnchor,
+      }, true);
+    }
+  }
+
+  _draw_manual_fib(ctx, win, fib, preview) {
+    const a = this._manual_anchor_to_local(fib.a);
+    const b = this._manual_anchor_to_local(fib.b);
+    if (!a || !b) return;
+
+    const s = this.priceScale;
+    const xMin = Math.min(a.index, b.index);
+    const xMax = Math.max(a.index, b.index);
+    if (xMin > win.last + 1) return;
+
+    const drawStart = Math.max(Math.min(xMin, win.last), win.first - 1);
+    const drawEnd = Math.min(win.last + 1, Math.max(xMax, win.last + 1));
+    const px1 = s.index_to_center_x(drawStart);
+    const px2 = s.index_to_center_x(drawEnd);
+    const guideAVisible = a.index >= win.first - 2 && a.index <= win.last + 2;
+    const guideBVisible = b.index >= win.first - 2 && b.index <= win.last + 2;
+
+    ctx.save();
+    ctx.globalAlpha = preview ? 0.55 : 0.86;
+    ctx.strokeStyle = preview ? '#90A4AE' : '#B9C8E8';
+    ctx.fillStyle = preview ? '#B0BEC5' : '#D7E3FF';
+    ctx.lineWidth = preview ? 1 : 1.15;
+
+    if (guideAVisible || guideBVisible) {
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(s.index_to_center_x(a.index), s.value_to_y(a.price));
+      ctx.lineTo(s.index_to_center_x(b.index), s.value_to_y(b.price));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    for (const ratio of MANUAL_FIB_LEVELS) {
+      const price = a.price + (b.price - a.price) * ratio;
+      const py = s.value_to_y(price);
+      if (py < -12 || py > s.height + 12) continue;
+      ctx.globalAlpha = preview ? 0.45 : (ratio === 0 || ratio === 1 ? 0.82 : 0.68);
+      ctx.strokeStyle = ratio === 0.5 ? '#FFD166' : '#9BB7E5';
+      ctx.beginPath();
+      ctx.moveTo(px1, Math.round(py) + 0.5);
+      ctx.lineTo(px2, Math.round(py) + 0.5);
+      ctx.stroke();
+
+      if (!preview && px2 > 24) {
+        ctx.globalAlpha = 0.92;
+        ctx.fillStyle = ratio === 0.5 ? '#FFD166' : '#D7E3FF';
+        ctx.font = '10px Arial';
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'right';
+        ctx.fillText(`${(ratio * 100).toFixed(ratio === 0 || ratio === 1 ? 0 : 1)}% ${price.toFixed(2)}`,
+          Math.min(px2 - 4, s.plot_width - 4), Math.round(py));
+      }
+    }
+
+    for (const anchor of [a, b]) {
+      const px = s.index_to_center_x(anchor.index);
+      const py = s.value_to_y(anchor.price);
+      if (px < -8 || px > s.plot_width + 8 || py < -8 || py > s.height + 8) continue;
+      ctx.globalAlpha = preview ? 0.70 : 0.95;
+      ctx.fillStyle = '#131722';
+      ctx.strokeStyle = '#D7E3FF';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
     ctx.restore();
   }
 

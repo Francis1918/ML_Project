@@ -43,9 +43,11 @@ body {
   border-color: #2962ff;
   color: #fff;
 }
-.tf-group { display: flex; gap: 4px; }
+.tf-group,
+.tool-group { display: flex; gap: 4px; }
 #toolbar .spacer { flex: 1 1 auto; }
 #btn-help { width: 30px; padding: 5px 0; text-align: center; font-weight: bold; }
+.tool-btn.compact { padding-left: 9px !important; padding-right: 9px !important; }
 
 
 /* ---------- Dropdown multi-select de overlays ---------- */
