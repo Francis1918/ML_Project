@@ -37,6 +37,11 @@ my @TFS           = qw(1m 5m 15m 1h 2h 4h D W);
 my $PERIOD        = 14;
 my $DEFAULT_LIMIT = 500;
 my $OVERLAY_LOOKBACK = 750;
+my $FULL_OVERLAY_MAX_CANDLES = 6_000;
+my $HTF_ACTIVE_MAX_LEVELS_PER_TF = 32;
+my $HTF_SWING_K = 3;
+my $HTF_EQ_FACTOR = 0.10;
+my $HTF_EQ_LOOKBACK_SWINGS = 120;
 
 my %HTF_SOURCES = (
     '1m'  => [qw(5m 15m 1h 4h D W)],
@@ -98,6 +103,7 @@ $mgr->register('ATR', Market::Indicators::ATR->new($PERIOD));
 
 my %CACHE;
 my %WINDOW_OVERLAY_CACHE;
+my %HTF_LIQUIDITY_SHAPE_CACHE;
 
 sub _build_market_cache_for {
     my ($tf) = @_;
@@ -388,19 +394,149 @@ sub _closed_htf_max_index {
     my ($candles, $htf, $cutoff_time) = @_;
     return -1 unless $candles && @$candles && defined $cutoff_time;
     my $minutes = _tf_minutes($htf);
-    my $max = -1;
-    for my $i (0 .. $#$candles) {
-        my $start = $candles->[$i]{time};
-        my $close = _add_minutes_iso($start, $minutes);
-        last if $close gt $cutoff_time;
-        $max = $i;
+
+    my $latest_closed_start = _add_minutes_iso($cutoff_time, -$minutes);
+    my ($lo, $hi) = (0, scalar @$candles);
+    while ($lo < $hi) {
+        my $mid = int(($lo + $hi) / 2);
+        if (($candles->[$mid]{time} // '') le $latest_closed_start) {
+            $lo = $mid + 1;
+        } else {
+            $hi = $mid;
+        }
     }
-    return $max;
+    return $lo - 1;
+}
+
+sub _fast_active_htf_levels {
+    my ($candles, $atr_series, $max_idx, $htf) = @_;
+    return [] unless $candles && @$candles && $max_idx >= 0;
+    $max_idx = $#$candles if $max_idx > $#$candles;
+    return [] if $max_idx < ($HTF_SWING_K * 2);
+
+    my (@future_high, @future_low);
+    for (my $i = $max_idx; $i >= 0; $i--) {
+        my $h = $candles->[$i]{high};
+        my $l = $candles->[$i]{low};
+        if ($i == $max_idx) {
+            $future_high[$i] = $h;
+            $future_low[$i]  = $l;
+        } else {
+            $future_high[$i] = $h > $future_high[$i + 1] ? $h : $future_high[$i + 1];
+            $future_low[$i]  = $l < $future_low[$i + 1]  ? $l : $future_low[$i + 1];
+        }
+    }
+
+    my (@highs, @lows);
+    for my $i ($HTF_SWING_K .. $max_idx) {
+        last if $i + $HTF_SWING_K > $max_idx;
+
+        my $is_high = 1;
+        my $is_low  = 1;
+        for my $j (1 .. $HTF_SWING_K) {
+            if ($candles->[$i - $j]{high} >= $candles->[$i]{high}
+             || $candles->[$i + $j]{high} >= $candles->[$i]{high}) {
+                $is_high = 0;
+            }
+            if ($candles->[$i - $j]{low} <= $candles->[$i]{low}
+             || $candles->[$i + $j]{low} <= $candles->[$i]{low}) {
+                $is_low = 0;
+            }
+            last unless $is_high || $is_low;
+        }
+
+        push @highs, {
+            index        => $i,
+            price        => $candles->[$i]{high},
+            confirmed_at => $i + $HTF_SWING_K,
+        } if $is_high;
+        push @lows, {
+            index        => $i,
+            price        => $candles->[$i]{low},
+            confirmed_at => $i + $HTF_SWING_K,
+        } if $is_low;
+    }
+
+    my @levels;
+    for my $sh (@highs) {
+        next unless _htf_level_is_active('BSL', $sh->{price}, $sh->{confirmed_at}, \@future_high, \@future_low);
+        push @levels, _htf_level($htf, 'BSL', $sh->{price}, $sh->{confirmed_at}, $sh->{index});
+    }
+    for my $sl (@lows) {
+        next unless _htf_level_is_active('SSL', $sl->{price}, $sl->{confirmed_at}, \@future_high, \@future_low);
+        push @levels, _htf_level($htf, 'SSL', $sl->{price}, $sl->{confirmed_at}, $sl->{index});
+    }
+
+    _append_fast_equal_htf_levels(\@levels, \@highs, 'EQH', $candles, $atr_series, $htf, \@future_high, \@future_low);
+    _append_fast_equal_htf_levels(\@levels, \@lows,  'EQL', $candles, $atr_series, $htf, \@future_high, \@future_low);
+
+    @levels = sort { ($b->{start_index} // 0) <=> ($a->{start_index} // 0) } @levels;
+    splice @levels, $HTF_ACTIVE_MAX_LEVELS_PER_TF
+        if @levels > $HTF_ACTIVE_MAX_LEVELS_PER_TF;
+    return \@levels;
+}
+
+sub _append_fast_equal_htf_levels {
+    my ($levels, $points, $type, $candles, $atr_series, $htf, $future_high, $future_low) = @_;
+    return unless $points && @$points >= 2;
+
+    for my $j (1 .. $#$points) {
+        my $cur = $points->[$j];
+        my $atr = $atr_series && defined $atr_series->[$cur->{index}]
+            ? $atr_series->[$cur->{index}]
+            : 0;
+        next unless $atr > 0;
+
+        my $tol = $atr * $HTF_EQ_FACTOR;
+        my ($best, $best_dist);
+        my $seen = 0;
+        for (my $i = $j - 1; $i >= 0 && $seen < $HTF_EQ_LOOKBACK_SWINGS; $i--, $seen++) {
+            my $prev = $points->[$i];
+            my $dist = abs($prev->{price} - $cur->{price});
+            next if $dist > $tol;
+            if (!defined $best_dist || $dist < $best_dist) {
+                $best = $prev;
+                $best_dist = $dist;
+            }
+        }
+        next unless $best;
+
+        my $price = ($best->{price} + $cur->{price}) / 2;
+        next unless _htf_level_is_active($type, $price, $cur->{confirmed_at}, $future_high, $future_low);
+        push @$levels, _htf_level($htf, $type, $price, $cur->{confirmed_at}, $best->{index} . '_' . $cur->{index});
+    }
+}
+
+sub _htf_level_is_active {
+    my ($type, $price, $start_index, $future_high, $future_low) = @_;
+    return 0 if !defined $start_index || $start_index < 0;
+
+    if ($type eq 'BSL' || $type eq 'EQH') {
+        return (($future_high->[$start_index] // $price) <= $price) ? 1 : 0;
+    }
+    return (($future_low->[$start_index] // $price) >= $price) ? 1 : 0;
+}
+
+sub _htf_level {
+    my ($htf, $type, $price, $start_index, $key) = @_;
+    return {
+        id          => sprintf('HTF_%s_%s_%s', $htf, $type, $key),
+        type        => $type,
+        timeframe   => $htf,
+        price       => $price + 0,
+        start_index => $start_index,
+        active      => 1,
+    };
 }
 
 sub _build_htf_liquidity_shapes_for {
     my ($tf, $win_end, $local_max) = @_;
     return [] unless exists $HTF_SOURCES{$tf};
+
+    my $cache_key = join(':', $tf, $win_end, $local_max);
+    return $HTF_LIQUIDITY_SHAPE_CACHE{$cache_key}
+        if exists $HTF_LIQUIDITY_SHAPE_CACHE{$cache_key};
+
     _build_market_cache_for($tf);
     my $base_cache = $CACHE{$tf};
     return [] unless $base_cache && $base_cache->{candles} && @{ $base_cache->{candles} };
@@ -417,24 +553,13 @@ sub _build_htf_liquidity_shapes_for {
         my $htf_max = _closed_htf_max_index($hc->{candles}, $htf, $cutoff_time);
         next if $htf_max < 0;
 
-        # Calcular solo hasta el ultimo HTF cerrado. Los HTF tienen pocas velas,
-        # asi que esto es suficientemente barato y evita depender de caches full.
-        my @hcandles = @{ $hc->{candles} }[0 .. $htf_max];
-        my @hatr     = @{ $hc->{atr}     }[0 .. $htf_max];
-        my $liq = Market::Indicators::Liquidity->compute(
-            candles           => \@hcandles,
-            atr_series        => \@hatr,
-            max_visible_index => $#hcandles,
-            timeframe         => $htf,
-            volume_sources    => _volume_sources(),
-            volume_until_time => $cutoff_time,
-        );
-
-        for my $lv (@{ $liq->{levels} // [] }) {
-            next unless $lv->{active};
+        # Para HTF solo necesitamos lineas de liquidez activas. Evitamos el
+        # indicador completo (volumen/eventos/estado) en la ruta interactiva.
+        my $levels = _fast_active_htf_levels($hc->{candles}, $hc->{atr}, $htf_max, $htf);
+        for my $lv (@$levels) {
             my $role = lc($lv->{type} // '');
             next unless $role =~ /^(bsl|ssl|eqh|eql)$/;
-            my $id = "HTF_${htf}_$lv->{id}";
+            my $id = $lv->{id};
             push @out, {
                 id                   => $id,
                 source_type          => 'liquidity',
@@ -473,7 +598,16 @@ sub _build_htf_liquidity_shapes_for {
         }
     }
 
+    $HTF_LIQUIDITY_SHAPE_CACHE{$cache_key} = \@out;
     return \@out;
+}
+
+sub _slow_overlay_allowed {
+    my ($c, $cache) = @_;
+    my $total = scalar @{ $cache->{candles} // [] };
+    return 1 if $total <= $FULL_OVERLAY_MAX_CANDLES;
+    return 1 if ($ENV{ALLOW_SLOW_OVERLAYS} // 0);
+    return (($c->param('allow_slow') // 0) ? 1 : 0);
 }
 
 # ============================================================
@@ -565,6 +699,7 @@ get '/api/candles' => sub {
     my $start_p      = $c->param('start');
     my $end_p        = $c->param('end');
     my $all          = ($c->param('all') // 0) ? 1 : 0;
+    my $with_anchors = ($c->param('anchors') // 0) ? 1 : 0;
     my $limit        = ($c->param('limit') // $DEFAULT_LIMIT) + 0;
     $limit = $DEFAULT_LIMIT if $limit <= 0 || $limit > 10_000;
 
@@ -587,11 +722,10 @@ get '/api/candles' => sub {
     my $local_max     = $win_end - $win_start;
     my $total         = scalar @{ $cache->{candles} };
 
-    $c->render(json => {
+    my $payload = {
         timeframe         => $tf,
         candles           => \@candles_slice,
         atr               => \@atr_slice,
-        anchors           => $cache->{anchors},
         total             => $total,
         win_start         => $win_start,
         first_index       => 0,
@@ -603,7 +737,10 @@ get '/api/candles' => sub {
             active => $is_replay ? \1 : \0,
             index  => $local_max,
         },
-    });
+    };
+    $payload->{anchors} = $cache->{anchors} if $with_anchors;
+
+    $c->render(json => $payload);
 };
 
 # --- /api/overlays : SMC + Liquidity + MarketRegime ventaneados ---
@@ -671,6 +808,18 @@ get '/api/overlays' => sub {
             liquidity => $liquidity,
             smc       => $smc,
         });
+    }
+
+    unless (_slow_overlay_allowed($c, $cache)) {
+        return $c->render(
+            json => {
+                error   => 'calculo full/debug demasiado costoso',
+                detail  => "TF $tf tiene " . scalar(@{ $cache->{candles} }) .
+                           " velas; usa la ruta ventaneada o agrega allow_slow=1",
+                max_safe_candles => $FULL_OVERLAY_MAX_CANDLES,
+            },
+            status => 403,
+        );
     }
 
     _build_overlay_cache_for($tf);

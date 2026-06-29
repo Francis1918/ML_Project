@@ -86,6 +86,7 @@ sub reset {
     $self->{events}          = [];
     $self->{_last_processed} = undef;
     $self->{_swings}         = [];
+    $self->{_volume_source_indexes} = {};
     $NEXT_ID = 1;
     return;
 }
@@ -111,30 +112,39 @@ sub compute {
     my $self = ref($class_or_self) ? $class_or_self : $class_or_self->new;
     $self->reset;
 
-    # Precomputar rolling average de volumen (ventana 14 barras)
     my $VOL_WIN = 14;
     my @vol_avg;
+    my $vol_sum = 0;
     for my $i (0 .. $#$candles) {
-        my $from = $i >= $VOL_WIN - 1 ? $i - $VOL_WIN + 1 : 0;
-        my ($sum, $cnt) = (0, 0);
-        for my $j ($from .. $i) { $sum += ($candles->[$j]{volume} // 0); $cnt++ }
-        $vol_avg[$i] = $cnt > 0 ? $sum / $cnt : 1;
+        $vol_sum += ($candles->[$i]{volume} // 0);
+        $vol_sum -= ($candles->[$i - $VOL_WIN]{volume} // 0) if $i >= $VOL_WIN;
+        my $cnt = $i + 1 < $VOL_WIN ? $i + 1 : $VOL_WIN;
+        $vol_avg[$i] = $cnt > 0 ? $vol_sum / $cnt : 1;
     }
     $self->{_vol_avg}           = \@vol_avg;
     $self->{_candles}           = $candles;
     $self->{_timeframe}         = $timeframe;
     $self->{_volume_sources}    = $volume_sources;
+    $self->{_volume_source_indexes} = _prepare_volume_source_indexes($volume_sources);
     $self->{_volume_until_time} = $volume_until_time;
 
     # Fase 1: detectar todos los swings y crear niveles BSL/SSL/EQH/EQL
     my @swings = _find_swing_points($candles, $max_visible_index);
     $self->_create_levels_from_swings(\@swings, $candles, $atr_series, $timeframe, $ext_levels);
 
-    # Fase 2: avanzar maquina de estados para cada vela
+    # Fase 2: avanzar maquina de estados solo sobre niveles vivos.
+    my @levels_by_start = sort { $a->{start_index} <=> $b->{start_index} } @{ $self->{levels} };
+    my @active_levels;
+    my $next_level = 0;
     for my $i (0 .. $max_visible_index) {
         last if $i > $#$candles;
+        while ($next_level <= $#levels_by_start
+            && $levels_by_start[$next_level]{start_index} <= $i) {
+            push @active_levels, $levels_by_start[$next_level++];
+        }
         my $c = $candles->[$i];
-        $self->_advance_states($c, $i, $max_visible_index);
+        $self->_advance_state_list($c, $i, \@active_levels);
+        @active_levels = grep { $_->{active} } @active_levels if @active_levels;
     }
 
     return {
@@ -253,65 +263,56 @@ sub _create_levels_from_swings {
         };
     }
 
-    # --- EQH: pares de Swing Highs con diferencia <= ATR * 0.10 ---
-    for my $i (0 .. $#highs) {
-        for my $j ($i+1 .. $#highs) {
-            my $atr = _atr_at($atr_series, $highs[$j]{index}) // 0;
-            next unless $atr > 0;
-            next unless abs($highs[$i]{price} - $highs[$j]{price}) <= $atr * EQ_FACTOR;
-
-            my $price = ($highs[$i]{price} + $highs[$j]{price}) / 2;
-            push @{ $self->{levels} }, {
-                id                 => _new_id(),
-                type               => 'EQH',
-                origin             => 'equal_level',
-                timeframe          => $timeframe,
-                price              => $price,
-                start_index        => $highs[$j]{confirmed_at},
-                end_index          => undef,
-                pivots             => [$highs[$i], $highs[$j]],
-                tolerance          => $atr * EQ_FACTOR,
-                state              => 'DETECTED',
-                active             => 1,
-                internal_or_external => _scope($price, $ext_levels),
-                volume_weights     => _vol_weight($self, $candles, $highs[$j]{index}),
-                _sweep_index       => undef,
-                _consecutive_out   => 0,
-                _sweep_candidate   => undef,
-            };
-        }
-    }
-
-    # --- EQL: pares de Swing Lows con diferencia <= ATR * 0.10 ---
-    for my $i (0 .. $#lows) {
-        for my $j ($i+1 .. $#lows) {
-            my $atr = _atr_at($atr_series, $lows[$j]{index}) // 0;
-            next unless $atr > 0;
-            next unless abs($lows[$i]{price} - $lows[$j]{price}) <= $atr * EQ_FACTOR;
-
-            my $price = ($lows[$i]{price} + $lows[$j]{price}) / 2;
-            push @{ $self->{levels} }, {
-                id                 => _new_id(),
-                type               => 'EQL',
-                origin             => 'equal_level',
-                timeframe          => $timeframe,
-                price              => $price,
-                start_index        => $lows[$j]{confirmed_at},
-                end_index          => undef,
-                pivots             => [$lows[$i], $lows[$j]],
-                tolerance          => $atr * EQ_FACTOR,
-                state              => 'DETECTED',
-                active             => 1,
-                internal_or_external => _scope($price, $ext_levels),
-                volume_weights     => _vol_weight($self, $candles, $lows[$j]{index}),
-                _sweep_index       => undef,
-                _consecutive_out   => 0,
-                _sweep_candidate   => undef,
-            };
-        }
-    }
+    _create_equal_levels($self, \@highs, 'EQH', $candles, $atr_series, $timeframe, $ext_levels);
+    _create_equal_levels($self, \@lows,  'EQL', $candles, $atr_series, $timeframe, $ext_levels);
 
     return;
+}
+
+sub _create_equal_levels {
+    my ($self, $points, $type, $candles, $atr_series, $timeframe, $ext_levels) = @_;
+    return unless @$points >= 2;
+
+    my $MAX_LOOKBACK_SWINGS = 120;
+    for my $j (1 .. $#$points) {
+        my $cur = $points->[$j];
+        my $atr = _atr_at($atr_series, $cur->{index}) // 0;
+        next unless $atr > 0;
+        my $tol = $atr * EQ_FACTOR;
+
+        my ($best, $best_dist);
+        my $seen = 0;
+        for (my $i = $j - 1; $i >= 0 && $seen < $MAX_LOOKBACK_SWINGS; $i--, $seen++) {
+            my $prev = $points->[$i];
+            my $dist = abs($prev->{price} - $cur->{price});
+            next if $dist > $tol;
+            if (!defined $best_dist || $dist < $best_dist) {
+                $best = $prev;
+                $best_dist = $dist;
+            }
+        }
+        next unless $best;
+
+        my $price = ($best->{price} + $cur->{price}) / 2;
+        push @{ $self->{levels} }, {
+            id                 => _new_id(),
+            type               => $type,
+            origin             => 'equal_level',
+            timeframe          => $timeframe,
+            price              => $price,
+            start_index        => $cur->{confirmed_at},
+            end_index          => undef,
+            pivots             => [$best, $cur],
+            tolerance          => $tol,
+            state              => 'DETECTED',
+            active             => 1,
+            internal_or_external => _scope($price, $ext_levels),
+            volume_weights     => _vol_weight($self, $candles, $cur->{index}),
+            _sweep_index       => undef,
+            _consecutive_out   => 0,
+            _sweep_candidate   => undef,
+        };
+    }
 }
 
 # ============================================================
@@ -320,8 +321,13 @@ sub _create_levels_from_swings {
 
 sub _advance_states {
     my ($self, $candle, $idx, $max_visible_index) = @_;
+    $self->_advance_state_list($candle, $idx, $self->{levels});
+}
 
-    for my $lv (@{ $self->{levels} }) {
+sub _advance_state_list {
+    my ($self, $candle, $idx, $levels) = @_;
+
+    for my $lv (@$levels) {
         next unless $lv->{active};
         next if $idx < $lv->{start_index};   # nivel no existe aun
 
@@ -458,9 +464,10 @@ sub _vol_weight {
     }
 
     my $sources = $self->{_volume_sources} // {};
-    my $m1  = _source_volume_weight($sources->{'1m'},  $start_time, $end_time);
-    my $m5  = _source_volume_weight($sources->{'5m'},  $start_time, $end_time);
-    my $m15 = _source_volume_weight($sources->{'15m'}, $start_time, $end_time);
+    my $source_indexes = $self->{_volume_source_indexes} // {};
+    my $m1  = _source_volume_weight($sources->{'1m'},  $start_time, $end_time, $source_indexes->{'1m'});
+    my $m5  = _source_volume_weight($sources->{'5m'},  $start_time, $end_time, $source_indexes->{'5m'});
+    my $m15 = _source_volume_weight($sources->{'15m'}, $start_time, $end_time, $source_indexes->{'15m'});
 
     # Score compacto 0..1 para priorizar eventos con participacion relativa alta.
     # Se basa en ratios frente al promedio local de cada fuente disponible.
@@ -495,10 +502,44 @@ sub _empty_vol_weight {
     };
 }
 
+sub _prepare_volume_source_indexes {
+    my ($sources) = @_;
+    return {} unless $sources;
+
+    my %indexes;
+    for my $tf (qw(1m 5m 15m)) {
+        my $source = $sources->{$tf};
+        next unless $source && @$source;
+        $indexes{$tf} = _prepare_volume_source_index($source);
+    }
+    return \%indexes;
+}
+
+sub _prepare_volume_source_index {
+    my ($source) = @_;
+    my (@times, @prefix);
+    $prefix[0] = 0;
+
+    for my $i (0 .. $#$source) {
+        my $c = $source->[$i];
+        $times[$i] = $c->{time} // '';
+        $prefix[$i + 1] = $prefix[$i] + ($c->{volume} // 0);
+    }
+
+    return {
+        source => $source,
+        times  => \@times,
+        prefix => \@prefix,
+    };
+}
+
 sub _source_volume_weight {
-    my ($source, $start_time, $end_time) = @_;
+    my ($source, $start_time, $end_time, $source_index) = @_;
     return { volume => 0, avg => 0, ratio => 0, candles => 0, estimated => 1 }
         unless $source && @$source && defined $start_time && defined $end_time;
+
+    return _source_volume_weight_indexed($source_index, $start_time, $end_time)
+        if $source_index && $source_index->{times} && @{ $source_index->{times} };
 
     my ($sum, $cnt) = (0, 0);
     for my $c (@$source) {
@@ -532,6 +573,85 @@ sub _source_volume_weight {
         candles   => $cnt + 0,
         estimated => $estimated ? 1 : 0,
     };
+}
+
+sub _source_volume_weight_indexed {
+    my ($idx, $start_time, $end_time) = @_;
+    my $source = $idx->{source};
+    my $times  = $idx->{times};
+    my $prefix = $idx->{prefix};
+    return { volume => 0, avg => 0, ratio => 0, candles => 0, estimated => 1 }
+        unless $source && @$source && $times && @$times && $prefix;
+
+    my $from = _lower_bound_time($times, $start_time);
+    my $to   = _lower_bound_time($times, $end_time);
+    my $cnt  = $to - $from;
+    my $sum  = $prefix->[$to] - $prefix->[$from];
+
+    my $estimated = 0;
+    if ($cnt == 0) {
+        my $pos = _upper_bound_time($times, $start_time) - 1;
+        if ($pos >= 0) {
+            $sum = $source->[$pos]{volume} // 0;
+            $cnt = 1;
+            $estimated = 1;
+        }
+    }
+
+    my $avg = _avg_volume_near_indexed($idx, $start_time, 14) || 1;
+    my $ratio = $avg > 0 ? $sum / $avg : 0;
+
+    return {
+        volume    => sprintf("%.2f", $sum) + 0,
+        avg       => sprintf("%.2f", $avg) + 0,
+        ratio     => sprintf("%.3f", $ratio) + 0,
+        candles   => $cnt + 0,
+        estimated => $estimated ? 1 : 0,
+    };
+}
+
+sub _avg_volume_near_indexed {
+    my ($idx, $time, $win) = @_;
+    my $times  = $idx->{times};
+    my $prefix = $idx->{prefix};
+    return 0 unless $times && @$times && $prefix;
+
+    my $pos = _upper_bound_time($times, $time) - 1;
+    $pos = 0 if $pos < 0;
+    my $from = $pos >= ($win - 1) ? $pos - $win + 1 : 0;
+    my $cnt = $pos - $from + 1;
+    my $sum = $prefix->[$pos + 1] - $prefix->[$from];
+    return $cnt ? $sum / $cnt : 0;
+}
+
+sub _lower_bound_time {
+    my ($times, $target) = @_;
+    my ($lo, $hi) = (0, scalar @$times);
+    while ($lo < $hi) {
+        my $mid = int(($lo + $hi) / 2);
+        if (($times->[$mid] // '') lt $target) {
+            $lo = $mid + 1;
+        }
+        else {
+            $hi = $mid;
+        }
+    }
+    return $lo;
+}
+
+sub _upper_bound_time {
+    my ($times, $target) = @_;
+    my ($lo, $hi) = (0, scalar @$times);
+    while ($lo < $hi) {
+        my $mid = int(($lo + $hi) / 2);
+        if (($times->[$mid] // '') le $target) {
+            $lo = $mid + 1;
+        }
+        else {
+            $hi = $mid;
+        }
+    }
+    return $lo;
 }
 
 sub _containing_candle {

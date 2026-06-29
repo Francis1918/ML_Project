@@ -32,7 +32,7 @@ const Replay = {
   SPEED_MS:  400,
 };
 
-// Replay/overlays siguen ventaneados; las velas normales se piden completas.
+// Carga normal, replay y overlays viajan por ventanas acotadas.
 const WINDOW_LIMIT = 500;
 
 
@@ -178,7 +178,7 @@ async function loadTimeframe(tf) {
 
   App.timeframe = tf;
   App.overlays = null;
-  const data = await fetchData(tf, { all: 1 }, signal);
+  const data = await fetchData(tf, {}, signal);
 
   const entry = _tfCache(tf);
   entry.data = data;
@@ -210,7 +210,7 @@ async function loadOverlaysFor(tf, extraParams = {}) {
   const signal = _overlayController.signal;
 
   try {
-    const params = cacheable ? { absolute: 1 } : extraParams;
+    const params = cacheable ? {} : extraParams;
     const overlays = await fetchOverlays(tf, params, signal);
     if (cacheable) _tfCache(tf).overlays = overlays;
     if (App.timeframe === tf && !Replay.active) {
@@ -417,7 +417,7 @@ function init() {
       if (k === 'r' || k === 'R') App.engine.reset_view();
       else if (k === 'q' || k === 'Q') {
         App.els.statusHover.textContent = 'Sesion detenida (Q). Recarga la pagina para reanudar.';
-        window.close();
+        _replayPause();
       }
     }
   });
