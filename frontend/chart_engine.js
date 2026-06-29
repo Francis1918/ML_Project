@@ -64,6 +64,7 @@ const DEFAULT_OVERLAY_VISIBILITY = Object.freeze({
   liq_grab:      true,
   liq_sweep:     true,
   liq_run:       true,
+  liq_htf:       true,
 
   market_regime: true,
 });
@@ -708,6 +709,7 @@ class ChartEngine {
     if (src === 'fib' || role === 'fib_level')    return this._overlay_layer_on('smc_fib');
 
     if (src === 'liquidity' && !this._overlay_layer_on('liq_all')) return false;
+    if ((sh.htf_source || sh.internal_or_external === 'external') && !this._overlay_layer_on('liq_htf')) return false;
 
     if (role === 'bsl') return this._overlay_layer_on('liq_bsl');
     if (role === 'ssl') return this._overlay_layer_on('liq_ssl');

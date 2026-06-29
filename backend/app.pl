@@ -39,13 +39,13 @@ my $DEFAULT_LIMIT = 500;
 my $OVERLAY_LOOKBACK = 750;
 
 my %HTF_SOURCES = (
-    '1m'  => [qw(1h 4h D)],
-    '5m'  => [qw(1h 4h D)],
-    '15m' => [qw(1h 4h D)],
-    '1h'  => [qw(4h D)],
-    '2h'  => [qw(4h D)],
-    '4h'  => ['D'],
-    'D'   => [],
+    '1m'  => [qw(5m 15m 1h 4h D W)],
+    '5m'  => [qw(15m 1h 4h D W)],
+    '15m' => [qw(1h 4h D W)],
+    '1h'  => [qw(2h 4h D W)],
+    '2h'  => [qw(4h D W)],
+    '4h'  => [qw(D W)],
+    'D'   => ['W'],
     'W'   => [],
 );
 
@@ -149,6 +149,8 @@ sub _build_overlay_cache_for {
         atr_series        => $atr_vals,
         max_visible_index => $max_idx,
         timeframe         => $tf,
+        volume_sources    => _volume_sources(),
+        volume_until_time => _add_minutes_iso($candles->[$max_idx]{time}, _tf_minutes($tf)),
     );
     app->log->info(sprintf("[cache][%s] Liquidity en %.3fs", $tf, tv_interval($t1)));
 
@@ -239,11 +241,15 @@ sub _build_window_overlay_for {
     my $vis_start_local = $win_start - $calc_start;
     my $vis_end_local   = $win_end   - $calc_start;
 
+    my $visible_until_time = _add_minutes_iso($cache->{candles}[$win_end]{time}, _tf_minutes($tf));
+
     my $liq = Market::Indicators::Liquidity->compute(
         candles           => \@candles,
         atr_series        => \@atr,
         max_visible_index => $max_idx,
         timeframe         => $tf,
+        volume_sources    => _volume_sources(),
+        volume_until_time => $visible_until_time,
     );
     my $smc = Market::Indicators::SMC_Structures->compute(
         candles           => \@candles,
@@ -343,6 +349,131 @@ sub _shift_shape_indices {
         $s{x2_index} += $delta if defined $s{x2_index};
         \%s;
     } @$shapes ];
+}
+
+sub _volume_sources {
+    my $data = $market->get_data;
+    return {
+        '1m'  => $data->{'1m'}  // [],
+        '5m'  => $data->{'5m'}  // [],
+        '15m' => $data->{'15m'} // [],
+    };
+}
+
+sub _tf_minutes {
+    my ($tf) = @_;
+    return 1     if $tf eq '1m';
+    return 5     if $tf eq '5m';
+    return 15    if $tf eq '15m';
+    return 60    if $tf eq '1h';
+    return 120   if $tf eq '2h';
+    return 240   if $tf eq '4h';
+    return 1440  if $tf eq 'D';
+    return 10080 if $tf eq 'W';
+    return 1;
+}
+
+sub _add_minutes_iso {
+    my ($iso, $minutes) = @_;
+    return $iso unless defined $iso && $iso =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/;
+    require Time::Local;
+    my ($Y, $Mo, $D, $h, $mi) = ($1+0, $2+0, $3+0, $4+0, $5+0);
+    my $epoch = Time::Local::timegm(0, $mi, $h, $D, $Mo - 1, $Y - 1900);
+    $epoch += ($minutes || 1) * 60;
+    my @g = gmtime($epoch);
+    return sprintf('%04d-%02d-%02dT%02d:%02d:00', $g[5]+1900, $g[4]+1, $g[3], $g[2], $g[1]);
+}
+
+sub _closed_htf_max_index {
+    my ($candles, $htf, $cutoff_time) = @_;
+    return -1 unless $candles && @$candles && defined $cutoff_time;
+    my $minutes = _tf_minutes($htf);
+    my $max = -1;
+    for my $i (0 .. $#$candles) {
+        my $start = $candles->[$i]{time};
+        my $close = _add_minutes_iso($start, $minutes);
+        last if $close gt $cutoff_time;
+        $max = $i;
+    }
+    return $max;
+}
+
+sub _build_htf_liquidity_shapes_for {
+    my ($tf, $win_end, $local_max) = @_;
+    return [] unless exists $HTF_SOURCES{$tf};
+    _build_market_cache_for($tf);
+    my $base_cache = $CACHE{$tf};
+    return [] unless $base_cache && $base_cache->{candles} && @{ $base_cache->{candles} };
+
+    my $visible_end = $base_cache->{candles}[$win_end]{time};
+    my $cutoff_time = _add_minutes_iso($visible_end, _tf_minutes($tf));
+    my @out;
+
+    for my $htf (@{ $HTF_SOURCES{$tf} // [] }) {
+        _build_market_cache_for($htf);
+        my $hc = $CACHE{$htf};
+        next unless $hc && $hc->{candles} && @{ $hc->{candles} };
+
+        my $htf_max = _closed_htf_max_index($hc->{candles}, $htf, $cutoff_time);
+        next if $htf_max < 0;
+
+        # Calcular solo hasta el ultimo HTF cerrado. Los HTF tienen pocas velas,
+        # asi que esto es suficientemente barato y evita depender de caches full.
+        my @hcandles = @{ $hc->{candles} }[0 .. $htf_max];
+        my @hatr     = @{ $hc->{atr}     }[0 .. $htf_max];
+        my $liq = Market::Indicators::Liquidity->compute(
+            candles           => \@hcandles,
+            atr_series        => \@hatr,
+            max_visible_index => $#hcandles,
+            timeframe         => $htf,
+            volume_sources    => _volume_sources(),
+            volume_until_time => $cutoff_time,
+        );
+
+        for my $lv (@{ $liq->{levels} // [] }) {
+            next unless $lv->{active};
+            my $role = lc($lv->{type} // '');
+            next unless $role =~ /^(bsl|ssl|eqh|eql)$/;
+            my $id = "HTF_${htf}_$lv->{id}";
+            push @out, {
+                id                   => $id,
+                source_type          => 'liquidity',
+                source_id            => $lv->{id},
+                kind                 => 'line',
+                timeframe            => $htf,
+                htf_source           => 1,
+                internal_or_external => 'external',
+                x1_index             => 0,
+                x2_index             => $local_max,
+                y1_price             => $lv->{price},
+                y2_price             => $lv->{price},
+                color_role           => $role,
+                line_style           => 'solid',
+                opacity              => 0.48,
+                visible_by_default   => 1,
+            };
+            push @out, {
+                id                   => "${id}_LBL",
+                source_type          => 'liquidity',
+                source_id            => $lv->{id},
+                kind                 => 'label',
+                timeframe            => $htf,
+                htf_source           => 1,
+                internal_or_external => 'external',
+                x1_index             => $local_max,
+                x2_index             => $local_max,
+                y1_price             => $lv->{price},
+                y2_price             => $lv->{price},
+                text                 => uc($lv->{type}) . " $htf",
+                color_role           => $role,
+                line_style           => 'solid',
+                opacity              => 0.70,
+                visible_by_default   => 1,
+            };
+        }
+    }
+
+    return \@out;
 }
 
 # ============================================================
@@ -508,6 +639,8 @@ get '/api/overlays' => sub {
         my $mr = $fast->{market_regime};
         my $liquidity = { %{ $fast->{liquidity} } };
         my $smc       = { %{ $fast->{smc} } };
+        my $htf_shapes = _build_htf_liquidity_shapes_for($tf, $win_end, $local_max);
+        $liquidity->{overlay_shapes} = [ @{ $liquidity->{overlay_shapes} // [] }, @$htf_shapes ];
         if ($absolute) {
             $liquidity->{overlay_shapes} =
                 _shift_shape_indices($liquidity->{overlay_shapes}, $win_start);
@@ -569,49 +702,12 @@ get '/api/overlays' => sub {
     }
 
     # HTF: niveles activos de temporalidades superiores.
-    # Solo se incluyen si el TF superior ya tiene su cache construido.
-    my @htf_shapes;
-    for my $htf (@{ $HTF_SOURCES{$tf} // [] }) {
-        next unless exists $CACHE{$htf} && $CACHE{$htf}{overlays_ready};
-        for my $lv (@{ $CACHE{$htf}{liq_levels} // [] }) {
-            next unless $lv->{active};
-            my $role = lc($lv->{type});
-            push @htf_shapes, {
-                id          => "HTF_${htf}_$lv->{id}",
-                source_type => 'liquidity',
-                source_id   => $lv->{id},
-                kind        => 'line',
-                timeframe   => $htf,
-                x1_index    => 0,
-                x2_index    => $local_max,
-                y1_price    => $lv->{price},
-                y2_price    => $lv->{price},
-                color_role  => $role,
-                line_style  => 'solid',
-                opacity     => 0.50,
-                visible_by_default => 1,
-            };
-            push @htf_shapes, {
-                id          => "HTF_LBL_${htf}_$lv->{id}",
-                source_type => 'liquidity',
-                source_id   => $lv->{id},
-                kind        => 'label',
-                timeframe   => $htf,
-                x1_index    => $local_max,
-                x2_index    => $local_max,
-                y1_price    => $lv->{price},
-                y2_price    => $lv->{price},
-                text        => uc($lv->{type}) . " $htf",
-                color_role  => $role,
-                line_style  => 'solid',
-                opacity     => 0.65,
-                visible_by_default => 1,
-            };
-        }
-    }
+    # Se calculan tambien en la ruta normal, no solo debug/full, y se
+    # recortan al ultimo HTF cerrado para evitar fuga de velas futuras.
+    my $htf_shapes = _build_htf_liquidity_shapes_for($tf, $win_end, $local_max);
 
     my $liquidity = {
-        overlay_shapes => [@$liq_shapes, @htf_shapes],
+        overlay_shapes => [@$liq_shapes, @$htf_shapes],
     };
     my $smc = {
         overlay_shapes => $smc_shapes,

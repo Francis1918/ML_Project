@@ -105,6 +105,8 @@ sub compute {
     my $max_visible_index = $args{max_visible_index} // $#$candles;
     my $timeframe         = $args{timeframe}         // '1m';
     my $ext_levels        = $args{ext_levels}        // [];  # niveles HTF para marcar external
+    my $volume_sources    = $args{volume_sources}    // {};  # { '1m'=>[...], '5m'=>[...], '15m'=>[...] }
+    my $volume_until_time = $args{volume_until_time};         # corte replay-safe opcional
 
     my $self = ref($class_or_self) ? $class_or_self : $class_or_self->new;
     $self->reset;
@@ -118,8 +120,11 @@ sub compute {
         for my $j ($from .. $i) { $sum += ($candles->[$j]{volume} // 0); $cnt++ }
         $vol_avg[$i] = $cnt > 0 ? $sum / $cnt : 1;
     }
-    $self->{_vol_avg} = \@vol_avg;
-    $self->{_candles} = $candles;
+    $self->{_vol_avg}           = \@vol_avg;
+    $self->{_candles}           = $candles;
+    $self->{_timeframe}         = $timeframe;
+    $self->{_volume_sources}    = $volume_sources;
+    $self->{_volume_until_time} = $volume_until_time;
 
     # Fase 1: detectar todos los swings y crear niveles BSL/SSL/EQH/EQL
     my @swings = _find_swing_points($candles, $max_visible_index);
@@ -428,20 +433,164 @@ sub _atr_at {
     return $atr_series->[$idx];
 }
 
-# Retorna hash con vol_at, vol_avg y vol_ratio para el indice dado
+# Retorna hash de pesado de volumen. Mantiene los campos legacy
+# vol_at/vol_avg/vol_ratio, pero agrega persistencia multi-temporal
+# obligatoria para 1m, 5m y 15m: m1, m5, m15, score, estimated.
 sub _vol_weight {
     my ($self, $candles, $idx) = @_;
-    return { vol_at => 0, vol_avg => 0, vol_ratio => 0, estimated => 0 }
+    return _empty_vol_weight()
         unless defined $candles && defined $idx && $idx <= $#$candles;
+
     my $vol_avg = $self->{_vol_avg} // [];
     my $vol_at  = $candles->[$idx]{volume} // 0;
     my $avg     = $vol_avg->[$idx] || 1;
-    return {
-        vol_at    => $vol_at,
-        vol_avg   => sprintf("%.2f", $avg),
-        vol_ratio => sprintf("%.2f", $vol_at / $avg),
-        estimated => 0,
+
+    my $legacy = {
+        vol_at    => $vol_at + 0,
+        vol_avg   => sprintf("%.2f", $avg) + 0,
+        vol_ratio => sprintf("%.2f", $vol_at / $avg) + 0,
     };
+
+    my $start_time = $candles->[$idx]{time};
+    my $end_time   = _add_minutes_iso($start_time, _tf_minutes($self->{_timeframe} // '1m'));
+    if (defined $self->{_volume_until_time} && $self->{_volume_until_time} lt $end_time) {
+        $end_time = $self->{_volume_until_time};
+    }
+
+    my $sources = $self->{_volume_sources} // {};
+    my $m1  = _source_volume_weight($sources->{'1m'},  $start_time, $end_time);
+    my $m5  = _source_volume_weight($sources->{'5m'},  $start_time, $end_time);
+    my $m15 = _source_volume_weight($sources->{'15m'}, $start_time, $end_time);
+
+    # Score compacto 0..1 para priorizar eventos con participacion relativa alta.
+    # Se basa en ratios frente al promedio local de cada fuente disponible.
+    my @ratios = grep { defined $_ } map { $_->{ratio} } ($m1, $m5, $m15);
+    my $ratio_avg = @ratios ? _sum(@ratios) / scalar(@ratios) : ($legacy->{vol_ratio} // 0);
+    my $score = $ratio_avg <= 0 ? 0 : $ratio_avg / 3.0;
+    $score = 1 if $score > 1;
+
+    my $estimated = ($m1->{estimated} || $m5->{estimated} || $m15->{estimated}) ? 1 : 0;
+
+    return {
+        %$legacy,
+        m1        => $m1,
+        m5        => $m5,
+        m15       => $m15,
+        score     => sprintf("%.3f", $score) + 0,
+        estimated => $estimated,
+    };
+}
+
+sub _empty_vol_weight {
+    my $empty = { volume => 0, avg => 0, ratio => 0, candles => 0, estimated => 1 };
+    return {
+        vol_at    => 0,
+        vol_avg   => 0,
+        vol_ratio => 0,
+        m1        => { %$empty },
+        m5        => { %$empty },
+        m15       => { %$empty },
+        score     => 0,
+        estimated => 1,
+    };
+}
+
+sub _source_volume_weight {
+    my ($source, $start_time, $end_time) = @_;
+    return { volume => 0, avg => 0, ratio => 0, candles => 0, estimated => 1 }
+        unless $source && @$source && defined $start_time && defined $end_time;
+
+    my ($sum, $cnt) = (0, 0);
+    for my $c (@$source) {
+        my $t = $c->{time};
+        next unless defined $t;
+        next if $t lt $start_time;
+        last if $t ge $end_time;
+        $sum += $c->{volume} // 0;
+        $cnt++;
+    }
+
+    my $estimated = 0;
+    if ($cnt == 0) {
+        # Si el TF fuente es mayor que la ventana activa, usar la vela fuente
+        # contenedora como aproximacion marcada. Esto mantiene estructura m1/m5/m15.
+        my $container = _containing_candle($source, $start_time);
+        if ($container) {
+            $sum = $container->{volume} // 0;
+            $cnt = 1;
+            $estimated = 1;
+        }
+    }
+
+    my $avg = _avg_volume_near($source, $start_time, 14) || 1;
+    my $ratio = $avg > 0 ? $sum / $avg : 0;
+
+    return {
+        volume    => sprintf("%.2f", $sum) + 0,
+        avg       => sprintf("%.2f", $avg) + 0,
+        ratio     => sprintf("%.3f", $ratio) + 0,
+        candles   => $cnt + 0,
+        estimated => $estimated ? 1 : 0,
+    };
+}
+
+sub _containing_candle {
+    my ($source, $time) = @_;
+    my $last;
+    for my $c (@$source) {
+        my $t = $c->{time};
+        next unless defined $t;
+        last if $t gt $time;
+        $last = $c;
+    }
+    return $last;
+}
+
+sub _avg_volume_near {
+    my ($source, $time, $win) = @_;
+    return 0 unless $source && @$source;
+    my $pos = 0;
+    for my $i (0 .. $#$source) {
+        last if ($source->[$i]{time} // '') gt $time;
+        $pos = $i;
+    }
+    my $from = $pos >= ($win - 1) ? $pos - $win + 1 : 0;
+    my ($sum, $cnt) = (0, 0);
+    for my $i ($from .. $pos) {
+        $sum += $source->[$i]{volume} // 0;
+        $cnt++;
+    }
+    return $cnt ? $sum / $cnt : 0;
+}
+
+sub _tf_minutes {
+    my ($tf) = @_;
+    return 1     if $tf eq '1m';
+    return 5     if $tf eq '5m';
+    return 15    if $tf eq '15m';
+    return 60    if $tf eq '1h';
+    return 120   if $tf eq '2h';
+    return 240   if $tf eq '4h';
+    return 1440  if $tf eq 'D';
+    return 10080 if $tf eq 'W';
+    return 1;
+}
+
+sub _add_minutes_iso {
+    my ($iso, $minutes) = @_;
+    return $iso unless defined $iso && $iso =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/;
+    my ($Y, $Mo, $D, $h, $mi) = ($1+0, $2+0, $3+0, $4+0, $5+0);
+    require Time::Local;
+    my $epoch = Time::Local::timegm(0, $mi, $h, $D, $Mo - 1, $Y - 1900);
+    $epoch += ($minutes || 1) * 60;
+    my @g = gmtime($epoch);
+    return sprintf("%04d-%02d-%02dT%02d:%02d:00", $g[5]+1900, $g[4]+1, $g[3], $g[2], $g[1]);
+}
+
+sub _sum {
+    my $s = 0;
+    $s += $_ for @_;
+    return $s;
 }
 
 # Determina si un precio pertenece a liquidez interna o externa
