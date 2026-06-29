@@ -35,6 +35,11 @@ El foco del avance actual es tener una base funcional para el primer corte del 2
 - Menú de indicadores para activar/desactivar capas visuales sin recalcular indicadores.
 - Proyección de liquidez externa HTF sobre temporalidades menores.
 - Pesado de volumen multi-temporal para eventos y niveles de liquidez.
+- Endpoint normalizado de eventos SMC por rango visible: `/api/indicators/smc/events`.
+- MSS, pivots strong/weak, Premium/Discount, Previous High/Low y estados `active`, `mitigated`, `invalidated` para FVG.
+- Configuración central del motor SMC en `backend/Market/SMCConfig.pm`.
+
+Documentación técnica ampliada: [`docs/SMC_INDICATOR.md`](docs/SMC_INDICATOR.md).
 
 ### Parcial o pendiente para siguientes entregas
 
@@ -56,6 +61,7 @@ ML_Project/
 │   └── Market/
 │       ├── MarketData.pm
 │       ├── IndicatorManager.pm
+│       ├── SMCConfig.pm
 │       ├── Indicators/
 │       │   ├── ATR.pm
 │       │   ├── Liquidity.pm
@@ -134,9 +140,13 @@ Cada nivel/evento conserva `volume_weights`. En la versión actual incluye datos
 Calcula estructuras SMC:
 
 - pivots `HH`, `HL`, `LH`, `LL`,
+- pivots `strong_high`, `weak_high`, `strong_low`, `weak_low`,
 - `BOS`,
 - `CHoCH`,
+- `MSS`,
 - FVG bullish/bearish,
+- Fibonacci y Premium/Discount,
+- Previous High/Low proyectado desde velas cerradas,
 - FVG de alta reacción cuando aparece asociado a barridos o grabs de liquidez.
 
 ### `Indicators/MarketRegime.pm`
@@ -211,13 +221,20 @@ La barra superior permite activar o desactivar capas:
 SMC:
 
 - Motor SMC,
+- Internal Structure,
+- Swing Structure,
+- Strong / Weak,
 - HH,
 - HL,
 - LH,
 - LL,
 - CHoCH,
 - BOS,
+- MSS,
 - FVG fade,
+- Fibonacci Auto,
+- Premium / Discount,
+- Previous High / Low,
 - Market Regime.
 
 Liquidez:
@@ -236,7 +253,7 @@ Liquidez:
 
 ### `/api/info`
 
-Devuelve metadatos de temporalidades y estado de cachés.
+Devuelve metadatos de temporalidades, configuración SMC y estado de cachés.
 
 ### `/api/candles`
 
@@ -265,6 +282,25 @@ Parámetros principales:
 - `full`
 
 La ruta normal calcula overlays ventaneados con lookback y agrega liquidez externa HTF.
+
+### `/api/indicators/smc/events`
+
+Devuelve eventos SMC normalizados por rango visible.
+
+Parámetros principales:
+
+- `tf` o `timeframe`
+- `start`
+- `end`
+- `from`
+- `to`
+- `limit`
+- `replay_index`
+- `symbol`
+
+Incluye eventos anclados por vela como swings, `HH/HL/LH/LL`, BOS, CHoCH, MSS, FVG, OB, Supply/Demand, Support/Resistance, Trendlines/Channels, Fibonacci, Daily body/wick, Premium/Discount, HTF liquidity y Previous High/Low.
+
+El limite por defecto de eventos esta centralizado en `backend/Market/SMCConfig.pm` (`maxEventsPerRequest`) y se aplica despues de filtrar por rango visible.
 
 ## Ejecución local
 

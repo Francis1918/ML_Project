@@ -26,14 +26,29 @@ const OV_COLORS = {
   pivot_hl:         '#4CAF50',
   pivot_lh:         '#FF5722',
   pivot_ll:         '#EF5350',
+  strong_high:      '#F48FB1',
+  weak_high:        '#EF9A9A',
+  strong_low:       '#80CBC4',
+  weak_low:         '#A5D6A7',
   bos_bullish:      '#26A69A',
   bos_bearish:      '#EF5350',
   choch_bullish:    '#00BCD4',
   choch_bearish:    '#FF9800',
+  mss_bullish:      '#64B5F6',
+  mss_bearish:      '#FFB74D',
   fvg_bullish:      '#26A69A',
   fvg_bearish:      '#EF5350',
   fvg_high_reaction:'#FFD700',
   fib_level:        '#9E9E9E',
+  premium_zone:     '#EF5350',
+  discount_zone:    '#26A69A',
+  equilibrium:      '#ECEFF1',
+  pdh:              '#FFCC80',
+  pdl:              '#80DEEA',
+  pwh:              '#FFB74D',
+  pwl:              '#4DD0E1',
+  pmh:              '#F57C00',
+  pml:              '#00838F',
   strategy_supertrend_bullish:   '#00C853',
   strategy_supertrend_bearish:   '#FF5252',
   strategy_halftrend_bullish:    '#8BC34A',
@@ -70,10 +85,16 @@ const DEFAULT_OVERLAY_VISIBILITY = Object.freeze({
   smc_hl:        true,
   smc_lh:        true,
   smc_ll:        true,
+  smc_internal:  true,
+  smc_swing:     true,
+  smc_strong_weak: true,
   smc_bos:       true,
   smc_choch:     true,
+  smc_mss:       true,
   smc_fvg:       true,
   smc_fib:       true,
+  smc_pd:        true,
+  smc_prev_hl:   true,
 
   liq_all:       true,
   liq_bsl:       true,
@@ -886,20 +907,42 @@ class ChartEngine {
     const src  = (sh.source_type || '').toLowerCase();
     const role = (sh.color_role  || '').toLowerCase();
 
+    const isPrevHL = src === 'previous_high_low' ||
+                     ['pdh', 'pdl', 'pwh', 'pwl', 'pmh', 'pml'].includes(role);
+    if (isPrevHL) {
+      return this._overlay_layer_on('smc_all') && this._overlay_layer_on('smc_prev_hl');
+    }
+
     const isSmcShape = src === 'smc' || src === 'fvg' || src === 'fib' ||
+                       src === 'premium_discount' ||
                        role.startsWith('pivot_') || role.startsWith('bos_') ||
-                       role.startsWith('choch_') || role.startsWith('fvg_') ||
-                       role === 'fib_level';
+                       role.startsWith('choch_') || role.startsWith('mss_') ||
+                       role === 'strong_high' || role === 'weak_high' ||
+                       role === 'strong_low' || role === 'weak_low' ||
+                       role.startsWith('fvg_') || role === 'fib_level' ||
+                       role === 'premium_zone' || role === 'discount_zone' ||
+                       role === 'equilibrium';
     if (isSmcShape && !this._overlay_layer_on('smc_all')) return false;
+    if (sh.structure_scope === 'internal' && !this._overlay_layer_on('smc_internal')) return false;
+    if (sh.structure_scope === 'external' && !this._overlay_layer_on('smc_swing')) return false;
 
     if (role === 'pivot_hh') return this._overlay_layer_on('smc_hh');
     if (role === 'pivot_hl') return this._overlay_layer_on('smc_hl');
     if (role === 'pivot_lh') return this._overlay_layer_on('smc_lh');
     if (role === 'pivot_ll') return this._overlay_layer_on('smc_ll');
+    if (role === 'strong_high' || role === 'weak_high' ||
+        role === 'strong_low' || role === 'weak_low') {
+      return this._overlay_layer_on('smc_strong_weak');
+    }
     if (role.startsWith('bos_'))   return this._overlay_layer_on('smc_bos');
     if (role.startsWith('choch_')) return this._overlay_layer_on('smc_choch');
+    if (role.startsWith('mss_'))   return this._overlay_layer_on('smc_mss');
     if (src === 'fvg' || role.startsWith('fvg_')) return this._overlay_layer_on('smc_fvg');
     if (src === 'fib' || role === 'fib_level')    return this._overlay_layer_on('smc_fib');
+    if (src === 'premium_discount' || role === 'premium_zone' ||
+        role === 'discount_zone' || role === 'equilibrium') {
+      return this._overlay_layer_on('smc_pd');
+    }
 
     if (src === 'liquidity' && !this._overlay_layer_on('liq_all')) return false;
     if ((sh.htf_source || sh.internal_or_external === 'external') && !this._overlay_layer_on('liq_htf')) return false;

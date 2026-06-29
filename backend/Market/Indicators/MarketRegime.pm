@@ -82,6 +82,7 @@ sub compute {
     # Niveles activos indexados por precio para lookup de proximidad
     my @active_internal = grep { ($_->{internal_or_external}//'internal') eq 'internal' } @$liq_lvls;
     my @active_external = grep { ($_->{internal_or_external}//'internal') eq 'external' } @$liq_lvls;
+    my @vol_avg = _volume_average($candles, $max_idx);
 
     # Confirmar si hay major high/low disponibles
     my @ext_pivots = grep { ($_->{scope}//'internal') eq 'external' } @$pivots;
@@ -123,7 +124,7 @@ sub compute {
         );
 
         # Solo volumen/ATR ajustan score, no crean estados
-        $score += 0.05 if _vol_high($c);
+        $score += 0.05 if _vol_high($c, $vol_avg[$i]);
         $score  = 1.0  if $score > 1.0;
 
         push @states, {
@@ -209,13 +210,13 @@ sub _apply_transitions {
         && ($liq_ev->{classification} eq 'SWEEP' || $liq_ev->{classification} eq 'GRAB')
         && ($liq_ev->{internal_or_external}//'internal') eq 'external'
         && $struct_ev
-        && $struct_ev->{type} eq 'CHOCH'
+        && (($struct_ev->{type} // '') eq 'CHOCH' || ($struct_ev->{type} // '') eq 'MSS')
         && $struct_ev->{confirmed}
         && ($struct_ev->{scope}//'') eq 'external'
         && $struct_ev->{break_mode} eq 'close') {
 
         return ('TRANSITION',
-                "Sweep/Grab externo ($liq_ev->{classification}) + CHoCH externo $struct_ev->{direction} confirmado",
+                "Sweep/Grab externo ($liq_ev->{classification}) + $struct_ev->{type} externo $struct_ev->{direction} confirmado",
                 $score + 0.30);
     }
 
@@ -251,6 +252,11 @@ sub _apply_transitions {
             return ('TRANSITION',
                     "CHoCH $struct_ev->{direction} externo confirmado por cierre",
                     $score + 0.20);
+        }
+        if ($struct_ev->{type} eq 'MSS') {
+            return ('TRANSITION',
+                    "MSS $struct_ev->{direction} externo confirmado por cierre",
+                    $score + 0.22);
         }
     }
 
@@ -313,11 +319,25 @@ sub _nearest_liquidity {
     return ($best_int, $best_ext);
 }
 
+sub _volume_average {
+    my ($candles, $max_idx) = @_;
+    my @avg;
+    my $sum = 0;
+    my $win = 20;
+    for my $i (0 .. $max_idx) {
+        last if $i > $#$candles;
+        $sum += $candles->[$i]{volume} // 0;
+        $sum -= $candles->[$i - $win]{volume} // 0 if $i >= $win;
+        my $cnt = $i + 1 < $win ? $i + 1 : $win;
+        $avg[$i] = $cnt ? $sum / $cnt : 0;
+    }
+    return @avg;
+}
+
 sub _vol_high {
-    my ($c) = @_;
-    # Placeholder: marcamos volumen alto si el volumen existe y es > 0
-    # En implementacion completa se compara con rolling average
-    return ($c->{volume} // 0) > 0 ? 0 : 0;  # desactivado sin referencia de media
+    my ($c, $avg) = @_;
+    return 0 unless defined $avg && $avg > 0;
+    return (($c->{volume} // 0) >= $avg * 1.35) ? 1 : 0;
 }
 
 1;

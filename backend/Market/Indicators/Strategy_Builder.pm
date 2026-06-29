@@ -14,8 +14,8 @@ use List::Util qw(max min sum);
 #    - SuperTrend con ATR y multiplicador configurable.
 #    - HalfTrend aproximado con filtro de reversión por ATR.
 #    - Range Filter con rango suavizado.
-#    - Supply/Demand validados por desplazamiento y volumen.
-#    - Order Blocks asociados al desplazamiento que confirma la zona.
+#    - Supply/Demand derivados de desplazamiento, OB o reaccion estructural.
+#    - Order Blocks validados por desplazamiento fuerte y BOS/CHoCH/MSS cercano.
 #    - Support/Resistance por clusters de pivots.
 #    - Trendlines y canales a partir de swings confirmados.
 #    - Niveles de cuerpo/mecha de la vela diaria cerrada previa.
@@ -263,7 +263,14 @@ sub _build_zones {
         my ($low, $high) = _zone_bounds($base, $zone_type);
         my $resolved = _resolve_zone($candles, $i + 1, $max_idx, $zone_type, $low, $high);
         my $liq_link = _near_event($liq_evts, $i, 6);
-        my $struct_link = _near_structure($structs, $i, 4);
+        my $struct_link = _near_structure($structs, $i, 5);
+        my $valid_struct = $struct_link
+            && (($struct_link->{type} // '') eq 'BOS'
+             || ($struct_link->{type} // '') eq 'CHOCH'
+             || ($struct_link->{type} // '') eq 'MSS');
+        my $derived_from = $valid_struct ? 'order_block'
+                         : $liq_link     ? 'liquidity_reaction'
+                         :                 'displacement';
 
         my $zone = {
             id                    => _new_id(),
@@ -285,17 +292,28 @@ sub _build_zones {
             volume_ratio          => sprintf('%.3f', $vol_ratio) + 0,
             liquidity_context_id  => $liq_link ? $liq_link->{id} : undef,
             structure_context_id  => $struct_link ? $struct_link->{id} : undef,
+            structure_context_type=> $struct_link ? $struct_link->{type} : undef,
+            derived_from          => $derived_from,
         };
 
         if ($zone_type eq 'demand') { push @demand, $zone }
         else                        { push @supply, $zone }
 
-        push @obs, {
-            %$zone,
-            id      => _new_id(),
-            type    => $bullish_impulse ? 'bullish_ob' : 'bearish_ob',
-            ob_side => $bullish_impulse ? 'bullish' : 'bearish',
-        };
+        if ($valid_struct) {
+            push @obs, {
+                %$zone,
+                id      => _new_id(),
+                type    => $bullish_impulse ? 'bullish_ob' : 'bearish_ob',
+                ob_side => $bullish_impulse ? 'bullish' : 'bearish',
+                validation => {
+                    displacement       => 1,
+                    volume_ratio       => sprintf('%.3f', $vol_ratio) + 0,
+                    structure_event_id => $struct_link->{id},
+                    structure_type     => $struct_link->{type},
+                    structure_scope    => $struct_link->{scope},
+                },
+            };
+        }
     }
 
     return (\@supply, \@demand, \@obs);
