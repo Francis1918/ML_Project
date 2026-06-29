@@ -953,23 +953,32 @@ class ChartEngine {
     };
   }
 
+  _overlay_shapes_from_payload() {
+    if (!this.overlays) return [];
+    const out = [];
+    for (const block of Object.values(this.overlays)) {
+      if (block?.overlay_shapes && Array.isArray(block.overlay_shapes)) {
+        out.push(...block.overlay_shapes);
+      }
+    }
+    return out;
+  }
+
   // ============================================================
-  //  Overlays (shapes de Liquidity + SMC)
+  //  Overlays: cualquier bloque con overlay_shapes usa la misma ruta.
   // ============================================================
 
   _draw_overlays(ctx, win) {
     if (!this.overlays) return;
     const s       = this.priceScale;
-    const lshapes = this.overlays.liquidity?.overlay_shapes ?? [];
-    const sshapes = this.overlays.smc?.overlay_shapes       ?? [];
-    const tshapes = this.overlays.strategy?.overlay_shapes  ?? [];
+    const shapes = this._overlay_shapes_from_payload();
 
     const rects  = [];
     const lines  = [];
     const labels = [];
     let htfLabelCount = 0;
 
-    for (const sh of [...lshapes, ...sshapes, ...tshapes]) {
+    for (const sh of shapes) {
       if (!sh.visible_by_default) continue;
       if (!this._is_overlay_shape_visible(sh)) continue;
       const localShape = this._shape_with_local_indices(sh);
@@ -1054,13 +1063,21 @@ class ChartEngine {
 
   _ov_line(ctx, s, sh, win) {
     const color = OV_COLORS[sh.color_role] ?? '#888888';
-    const x1    = Math.max(sh.x1_index, win.first - 1);
-    const x2    = Math.min(sh.x2_index ?? sh.x1_index, win.last + 1);
+    const rawX1 = Number(sh.x1_index);
+    const rawX2 = Number(sh.x2_index ?? sh.x1_index);
+    if (!Number.isFinite(rawX1) || !Number.isFinite(rawX2)) return;
+    const x1    = Math.max(rawX1, win.first - 1);
+    const x2    = Math.min(rawX2, win.last + 1);
     const px1   = s.index_to_center_x(x1);
     const px2   = s.index_to_center_x(x2);
-    const y2Price = sh.y2_price ?? sh.y1_price;
-    const py1   = s.value_to_y(sh.y1_price);
-    const py2   = s.value_to_y(y2Price);
+    const rawY1 = Number(sh.y1_price);
+    const rawY2 = Number(sh.y2_price ?? sh.y1_price);
+    if (!Number.isFinite(rawY1) || !Number.isFinite(rawY2)) return;
+    const priceAt = (x) => rawX2 === rawX1
+      ? rawY1
+      : rawY1 + (rawY2 - rawY1) * ((x - rawX1) / (rawX2 - rawX1));
+    const py1   = s.value_to_y(priceAt(x1));
+    const py2   = s.value_to_y(priceAt(x2));
     if ((py1 < 0 && py2 < 0) || (py1 > s.height && py2 > s.height)) return;
     ctx.save();
     ctx.globalAlpha = sh.opacity ?? 0.8;
