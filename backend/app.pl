@@ -34,7 +34,7 @@ use Market::Overlays::Strategy_Builder;
 
 push @{ app->static->paths }, "$FindBin::Bin/../frontend";
 
-my $CSV           = "$FindBin::Bin/data/2026_03.csv";
+my $CSV           = "$FindBin::Bin/data/2026_06_29.csv";
 my @TFS           = qw(1m 5m 15m 1h 2h 4h D W);
 my $PERIOD        = 14;
 my $DEFAULT_LIMIT = 500;
